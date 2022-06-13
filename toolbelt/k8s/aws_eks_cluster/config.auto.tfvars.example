@@ -1,0 +1,18 @@
+aws_access_key = "<access key>"
+aws_secret_key = "<secret key>"
+
+
+region = "eu-central-1"
+kubernetes_version = "1.21"
+
+additional_admins = []
+#Users besides the aws_access_key owner which should be able to access EKS details via AWS console
+#additional_admins = [
+#  {
+#    "userarn": "arn:aws:iam::12345:user/foo",
+#    "username": "foo"
+#  }
+#]
+
+#Pods from these namespaces get scheduled to the Fargate instead of the default node group
+fargate_namespaces = ["fg-workload"]

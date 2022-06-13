@@ -95,7 +95,7 @@ data "template_file" "kubeconfig" {
 
 resource "local_file" "kubeconfig_out" {
   content  = "${data.template_file.kubeconfig.rendered}"
-  filename = "${path.module}/kube_config"
+  filename = "${path.module}/../kube_config"
 }
 
 

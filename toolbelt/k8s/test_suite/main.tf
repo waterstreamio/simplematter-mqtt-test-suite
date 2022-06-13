@@ -1,7 +1,5 @@
 provider "kubernetes" {
-#  config_path    = "~/.kube/config"
-  config_path    = "../gke_cluster/kube_config"
-#  config_context = "my-context"
+  config_path    = "../kube_config"
 }
 
 # Use a random suffix to prevent overlap in names
