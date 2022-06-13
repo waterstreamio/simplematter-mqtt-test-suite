@@ -1,0 +1,18 @@
+# Local .terraform directories
+**/.terraform/*
+.terraform.lock.hcl
+
+# .tfstate files
+*.tfstate
+*.tfstate.*
+
+# .tfvars files
+*.tfvars
+
+account.json
+
+.idea
+
+*.license
+
+kube_config

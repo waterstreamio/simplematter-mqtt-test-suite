@@ -1,0 +1,84 @@
+version: '3.3'
+
+services:
+  zookeeper:
+    image: "confluentinc/cp-zookeeper:${CONFLUENT_VERSION}"
+    container_name: waterstream-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    network_mode: host
+    #ports:
+    #  - "2181:2181"
+    restart: unless-stopped
+
+  kafka:
+    image: "confluentinc/cp-kafka:${CONFLUENT_VERSION}"
+    container_name: waterstream-kafka
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      #for bridge network
+#      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      #for host network
+      KAFKA_ZOOKEEPER_CONNECT: localhost:2181
+      #for bridge network
+#      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      #for host network
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    network_mode: host
+#    ports:
+#      - "9092:9092"
+    restart: unless-stopped
+
+  kafka-setup:
+    image: "confluentinc/cp-kafka:${CONFLUENT_VERSION}"
+    container_name: waterstream-kafka-setup
+    depends_on:
+      - kafka
+    command: "bash -c 'echo Waiting for Kafka to be ready... && \
+      cub kafka-ready -b localhost:9092 1 60 && \
+      kafka-topics --zookeeper localhost:2181 --create --if-not-exists --topic ${SESSION_TOPIC} --partitions 5 --replication-factor 1 --config cleanup.policy=compact --config min.compaction.lag.ms=60000 --config delete.retention.ms=600000 && \
+      kafka-topics --zookeeper localhost:2181 --create --if-not-exists --topic ${RETAINED_MESSAGES_TOPIC} --partitions 5 --replication-factor 1 --config cleanup.policy=compact --config min.compaction.lag.ms=60000 --config delete.retention.ms=600000 && \
+      kafka-topics --zookeeper localhost:2181 --create --if-not-exists --topic ${CONNECTION_TOPIC} --partitions 5 --replication-factor 1 --config cleanup.policy=delete --config retention.ms=600000 && \
+      kafka-topics --zookeeper localhost:2181 --create --if-not-exists --topic ${MESSAGES_TOPIC} --partitions 5 --replication-factor 1 $DEFAULT_MESSAGES_RETENTION &&
+      kafka-topics --zookeeper localhost:2181 --create --if-not-exists --topic ${HEARTBEAT_TOPIC} --partitions 5 --replication-factor 1 --config retention.ms=60000 '"
+    # The following settings are listed here only to satisfy the image's requirements.
+    # We override the image's `command` anyways, hence this container will not start a broker.
+    environment:
+      KAFKA_BROKER_ID: ignored
+      KAFKA_ZOOKEEPER_CONNECT: ignored
+    network_mode: host
+    restart: "no"
+
+  waterstream:
+    image: "simplematter/waterstream-kafka:${WATERSTREAM_VERSION}"
+    container_name: waterstream
+    depends_on:
+      - kafka-setup
+    environment:
+      #for bridge network
+#      KAFKA_BOOTSTRAP_SERVERS: "PLAINTEXT://kafka:9092"
+      #for host network
+      KAFKA_BOOTSTRAP_SERVERS: "PLAINTEXT://localhost:9092"
+      KAFKA_TRANSACTIONAL_ID: ""
+      MQTT_PORT: 1883
+      MONITORING_PORT: 1884
+      MONITORING_INCLUDE_JAVA_METRICS: "true"
+      #For testing message publish refuse
+#      AUTHORIZATION_RULES_PATH: "/etc/waterstream_auth.csv"
+    network_mode: host
+    volumes:
+      - ./waterstream.license:/etc/waterstream.license
+      - ./sampleAuthRules.csv:/etc/waterstream_auth.csv
+#    ports:
+#      - "1883:1883"
+#      - "1884:1884"
+    restart: unless-stopped
+
+

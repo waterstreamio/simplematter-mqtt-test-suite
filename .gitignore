@@ -1,2 +1,7 @@
-*.class
-*.log
+target
+.bsp
+.idea
+
+currentTest.sh
+waterstream.license
+tmp

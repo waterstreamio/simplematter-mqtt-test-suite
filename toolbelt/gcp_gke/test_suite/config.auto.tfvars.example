@@ -1,0 +1,38 @@
+#TODO specify me
+#docker_username = "<Dockerhub username>"
+#docker_password = "<Dockerhub password>"
+
+mqtt_test_suite_version = "0.0.4"
+
+#TODO specify me
+mqtt_server = "<MQTT broker>:1883"
+
+#TODO specify me
+kafka_bootstrap_servers = "<Kafka broker>:9092"
+
+#node_count = 1
+node_count = 2
+#node_count = 4
+#node_count = 8
+#node_count = 16
+
+node_cpu =  "2"
+#node_cpu =  "4"
+#node_memory = "4096M"
+node_memory = "4096M"
+#node_memory = "8192M"
+
+test_scenario_file = "scenario/mqttToMqtt_5min_100cl_2fan.conf"
+#test_scenario = "mqttToKafka"
+#test_scenario = "kafkaToMqtt"
+#test_scenario = "mqttToMqtt"
+
+#kafka_sslEndpointIdentificationAlgorithm = "https"
+#kafka_saslJaasConfig = "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"<CC cluster username>\" password=\"<CC cluster password>\";"
+#kafka_saslMechanism = "PLAIN"
+#kafka_securityProtocol = "SASL_SSL"
+#kafka_requestTimeoutMs = 30000
+
+#stats_individual_message_tracking = false
+stats_individual_message_tracking = true
+

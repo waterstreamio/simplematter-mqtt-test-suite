@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <layout class="ch.qos.logback.classic.PatternLayout">
+            <Pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</Pattern>
+        </layout>
+    </appender>
+
+    <logger name="io.simplematter" level="DEBUG"/>
+<!--    <logger name="io.simplematter.mqtttestsuite.mqtt.MqttClient" level="INFO"/>-->
+<!--    <logger name="io.simplematter.mqtttestsuite.scenario.util.MqttPublisher" level="TRACE"/>-->
+<!--    <logger name="io.simplematter.mqtttestsuite.mqtt.MqttClient" level="DEBUG"/>-->
+<!--    <logger name="io.simplematter.mqtttestsuite.stats.StatsStorage" level="DEBUG"/>-->
+<!--    <logger name="io.simplematter.mqtttestsuite.stats.StatsStorage" level="TRACE"/>-->
+    <logger name="io.netty" level="INFO"/>
+<!--    <logger name="io.netty" level="DEBUG"/>-->
+<!--    <logger name="org.apache.kafka.clients.producer" level="DEBUG"/>-->
+
+    <root level="INFO">
+        <appender-ref ref="STDOUT" />
+    </root>
+</configuration>
