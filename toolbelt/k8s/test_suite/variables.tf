@@ -3,6 +3,15 @@ variable "namespace" {
   default = "mqtt-test"
 }
 
+variable "mqtt_test_suite_version" {
+  type = string
+  default = "0.0.4"
+}
+
+###############################################################
+## Docker
+###############################################################
+
 variable "docker_server" {
   type = string
   default = "index.docker.io"
@@ -16,9 +25,13 @@ variable "docker_password" {
   type = string
 }
 
-variable "mqtt_test_suite_version" {
+###############################################################
+## Kubernetes
+###############################################################
+
+variable "kubernetes_config_path" {
   type = string
-  default = "0.0.4"
+  default = "../kube_config"
 }
 
 ###############################################################

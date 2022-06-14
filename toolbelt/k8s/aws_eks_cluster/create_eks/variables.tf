@@ -4,11 +4,12 @@ variable "cluster_name" {
 }
 
 variable "kubernetes_version" {
-  default = "1.21"
+  default = "1.22.9"
   type    = string
 }
 
 variable "default_k8s_node_group_instance_type" {
+  # 2 CPU, 8 GB RAM
   default = "t3.large"
   type    = string
 }

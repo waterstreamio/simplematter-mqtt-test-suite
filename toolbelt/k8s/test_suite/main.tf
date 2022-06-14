@@ -1,5 +1,5 @@
 provider "kubernetes" {
-  config_path    = "../kube_config"
+  config_path    = var.kubernetes_config_path
 }
 
 # Use a random suffix to prevent overlap in names

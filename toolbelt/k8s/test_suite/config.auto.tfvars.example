@@ -16,7 +16,7 @@ node_count = 2
 #node_count = 8
 #node_count = 16
 
-node_cpu =  "2"
+node_cpu =  "1"
 #node_cpu =  "4"
 #node_memory = "4096M"
 node_memory = "4096M"

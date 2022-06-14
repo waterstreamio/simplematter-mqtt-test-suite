@@ -3,7 +3,7 @@ aws_secret_key = "<secret key>"
 
 
 region = "eu-central-1"
-kubernetes_version = "1.21"
+kubernetes_version = "1.22.9"
 
 additional_admins = []
 #Users besides the aws_access_key owner which should be able to access EKS details via AWS console

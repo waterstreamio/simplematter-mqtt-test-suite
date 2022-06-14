@@ -34,7 +34,7 @@ module "eks" {
     }
   }
 
-
+# Uncomment to enable Fargate - takes longer to create K8s cluster, but more flexible with the workload size
 #  fargate_profiles = {
 #    default = {
 #      name = "default"
