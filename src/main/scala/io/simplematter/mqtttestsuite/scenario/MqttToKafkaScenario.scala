@@ -3,7 +3,7 @@ package io.simplematter.mqtttestsuite.scenario
 import com.hazelcast.core.HazelcastInstance
 import io.netty.handler.codec.mqtt.MqttQoS
 import io.simplematter.mqtttestsuite.config.{KafkaConfig, MqttBrokerConfig, ScenarioConfig}
-import io.simplematter.mqtttestsuite.kafka.{KafkaUtils, KafkaOffsetsCache}
+import io.simplematter.mqtttestsuite.kafka.{KafkaOffsetsCache, KafkaUtils}
 import io.simplematter.mqtttestsuite.scenario.util.MqttPublisher
 import io.simplematter.mqtttestsuite.stats.FlightRecorder
 import io.simplematter.mqtttestsuite.util.{ErrorInjector, MessageGenerator}
@@ -15,12 +15,13 @@ import zio.duration.*
 import zio.clock.Clock
 import zio.blocking.Blocking
 
-import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
+import java.util.concurrent.{ConcurrentHashMap, LinkedBlockingQueue, ThreadPoolExecutor, TimeUnit}
 import scala.concurrent.Future
 import zio.kafka.serde.Serde
 import zio.kafka.consumer.{Consumer, ConsumerSettings, Subscription}
 import Consumer.OffsetRetrieval
 import org.apache.kafka.common.TopicPartition
+import zio.internal.Executor
 
 import java.nio.file.Path
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
@@ -46,6 +47,11 @@ class MqttToKafkaScenario(stepInterval: Duration,
   private val publishingClientPrefix = scenarioConfig.clientPrefix + nodeId + "-"
 
   private val kafkaClientId = ClientId("kafka-"+nodeId)
+
+  //To make sure that reading doesn't compete for the resources with the publishing
+  private val kafkaReadingExecutor = Executor.fromThreadPoolExecutor(_ => 1024)(new ThreadPoolExecutor(
+    2, 10, 10, TimeUnit.SECONDS, new LinkedBlockingQueue[Runnable]()
+  ))
 
   override def start(): RIO[ScenarioEnv, Fiber[Any, Any]] = {
     log.info(s"Starting the scenario for node ${nodeId}")
@@ -115,6 +121,7 @@ class MqttToKafkaScenario(stepInterval: Duration,
             receivingTimestamp = if (scenarioConfig.useKafkaTimestampForLatency) rec.timestamp else now
             (messageId, sendingTimestamp) <- MessageGenerator.unpackMessagePrefix(rec.value)
             _ <- flightRecorder.messageReceived(messageId, rec.record.topic() + " " + rec.key, kafkaClientId, sendingTimestamp, receivingTimestamp)
+            _ = if(log.isDebugEnabled()) log.debug("Received Kafka message: id={}, topic={}, partition={}, key={}", messageId, rec.record.topic(), rec.record.partition(), rec.key) else ()
           } yield rec.offset).catchAll { err =>
             ZIO.succeed {
               log.error("Failed to process Kafka record", err)
@@ -130,7 +137,7 @@ class MqttToKafkaScenario(stepInterval: Duration,
       //Init offsets cache before starting the message reading loop
       _ <- offsetsCache.getOffsets(thisNodeTopicPartitions)
       /* We can only fork here due to strange zio-kafka behavior - it doesn't start consuming if forked before provideSomeLayer */
-      _ <- streamExec(thisNodeTopicPartitions).provideSomeLayer[ScenarioEnv](consumerLayer).fork
+      _ <- streamExec(thisNodeTopicPartitions).provideSomeLayer[ScenarioEnv](consumerLayer).lock(kafkaReadingExecutor).fork
     } yield ()
   }
 }
