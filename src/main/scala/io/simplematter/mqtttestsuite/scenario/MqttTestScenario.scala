@@ -156,7 +156,7 @@ trait MqttTestScenario {
              } yield acc :+ (consumer, mcFiber)
       }
       _ = log.debug("Creating consumers complete, waiting for subscriptions")
-      _ <- ZIO.collectAllPar(allConsumers.map(_.waitForSubscribe(mqttBrokerConfig.connectionTimeoutSeconds.seconds)))
+      _ <- ZIO.collectAllPar(allConsumers.map(_.waitForSubscribe(mqttBrokerConfig.subscribeTimeoutSeconds.seconds).retryN(mqttBrokerConfig.subscribeMaxRetries)))
       _ = log.debug("Consumer subscriptions established")
       stopTimestamp <- clock.currentTime(TimeUnit.MILLISECONDS)
       _ = log.debug(s"After ramp up: ${allConsumers.size} consumers, consumers ramp up actual duration = ${stopTimestamp - startTimestamp}")

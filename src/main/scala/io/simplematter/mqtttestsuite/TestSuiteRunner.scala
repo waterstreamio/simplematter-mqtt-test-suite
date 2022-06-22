@@ -31,11 +31,28 @@ object TestSuiteRunner extends zio.App {
       _ = log.info("Starting scenario {} with node index {}", scn.name, runnerNodeIndex)
       statsReporter <- ZIO.service[StatsReporter]
       stF <- statsReporter.run().fork
-      postScenario <- scn.start()
-      _ = log.info(s"Scenario ${scn.name} complete, waiting ${config.completionTimeout} for the remaining messages")
-      _ <- StatsStorage.waitCompletion(config.completionTimeout)
+//      postScenario <- scn.start()
+//      _ = log.info(s"Scenario ${scn.name} complete, waiting ${config.completionTimeout} for the remaining messages")
+//      _ <- StatsStorage.waitCompletion(config.completionTimeout)
+//      _ <- stF.interrupt
+//      _ <- postScenario.interrupt
+      //TODO try again with flatMap
+      _ <- scn.start().onError(cause =>
+        //fail
+        for {
+          flightRecorder <- FlightRecorder.live
+          _ <- flightRecorder.scenarioFail()
+          _ = log.error(s"Scenario ${scn.name} failed", cause.squash)
+        } yield ()
+      ).flatMap { postScenario =>
+        //success
+        for {
+          _ <- ZIO { log.info(s"Scenario ${scn.name} complete, waiting ${config.completionTimeout} for the remaining messages") }
+          _ <- StatsStorage.waitCompletion(config.completionTimeout)
+          _ <- postScenario.interrupt
+        } yield ()
+      }
       _ <- stF.interrupt
-      _ <- postScenario.interrupt
       testStopTimestamp <- clock.instant
       _ <- StatsStorage.finalizeStats()
       _ = statsReporter.printStats(testStopTimestamp.toEpochMilli(), Option(s"Final - ${testStopTimestamp}"))

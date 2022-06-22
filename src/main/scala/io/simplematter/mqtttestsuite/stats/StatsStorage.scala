@@ -46,6 +46,7 @@ class StatsStorage(nodeId: NodeId,
   private val messagesSendFailure: AtomicInteger = AtomicInteger(0)
   private var messageSentFirstTimestamp = AtomicLong(0)
   private var messageSentLastTimestamp = AtomicLong(0)
+  private var messageSendingDurationTotal = AtomicLong(0)
   private var messagePublishRetransmitAttempts: AtomicInteger = AtomicInteger(0)
   private var messagePubrelRetransmitAttempts: AtomicInteger = AtomicInteger(0)
 
@@ -193,6 +194,8 @@ class StatsStorage(nodeId: NodeId,
         log.info(s"Message sending interrupt ${id} ${sendStartTimestamp}" )
         messagesSendInterrupts.incrementAndGet()
       })
+      sendEndTimestamp <- clock.currentTime(TimeUnit.MILLISECONDS)
+      _ = messageSendingDurationTotal.addAndGet(sendEndTimestamp - sendStartTimestamp)
       _ = messagesSendSuccess.incrementAndGet()
       fanOutFactor = recepients.fold(1)(_.size)
       _ = messagesReceiveExpected.addAndGet(fanOutFactor)
@@ -373,7 +376,8 @@ class StatsStorage(nodeId: NodeId,
     publishRetransmitAttempts = messagePublishRetransmitAttempts.get(),
     pubrelRetransmitAttempts = messagePubrelRetransmitAttempts.get(),
     firstTimestamp = messageSentFirstTimestamp.get(),
-    lastTimestamp = messageSentLastTimestamp.get()
+    lastTimestamp = messageSentLastTimestamp.get(),
+    sendingDuration = messageSendingDurationTotal.get()
   )
 
   private def getMessagesReceived(): StatsSummary.ReceivedMessages = StatsSummary.ReceivedMessages(

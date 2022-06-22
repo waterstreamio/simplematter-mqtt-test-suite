@@ -138,7 +138,7 @@ class MqttClient(host: String, port: Int, options: MqttOptions = MqttOptions()) 
     val channelFuture = b.connect(host, port)
     channelFuture.addListener({ (result: io.netty.util.concurrent.Future[_ >: Void]) =>
       if(result.isSuccess()) {
-        log.info("Channel established successfully")
+        log.debug("Channel established successfully")
         channelRef.updateAndGet { prevChannel =>
           if(prevChannel != null) prevChannel.close()
           channelFuture.channel()

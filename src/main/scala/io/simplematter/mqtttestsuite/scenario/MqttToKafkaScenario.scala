@@ -121,7 +121,9 @@ class MqttToKafkaScenario(stepInterval: Duration,
             receivingTimestamp = if (scenarioConfig.useKafkaTimestampForLatency) rec.timestamp else now
             (messageId, sendingTimestamp) <- MessageGenerator.unpackMessagePrefix(rec.value)
             _ <- flightRecorder.messageReceived(messageId, rec.record.topic() + " " + rec.key, kafkaClientId, sendingTimestamp, receivingTimestamp)
-            _ = if(log.isDebugEnabled()) log.debug("Received Kafka message: id={}, topic={}, partition={}, key={}", messageId, rec.record.topic(), rec.record.partition(), rec.key) else ()
+            _ = if(log.isDebugEnabled())
+              log.debug("Received Kafka message: id={}, topic={}, partition={}, key={}, endToEndLatency={}, mqttToKafkaLatency={}", messageId, rec.record.topic(), rec.record.partition(), rec.key, receivingTimestamp-sendingTimestamp, receivingTimestamp - rec.timestamp)
+              else ()
           } yield rec.offset).catchAll { err =>
             ZIO.succeed {
               log.error("Failed to process Kafka record", err)

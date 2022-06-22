@@ -53,6 +53,7 @@ case class StatsSummary(mqttConnectAttempts: Int,
     val mqttBrokerConfigTxt = mqttBrokerConfig.fold("")(cfg => "|MQTT cfg: " + cfg.toJson + "\n|")
     val scenarioConfigTxt = scenarioConfig.fold("")(cfg => "|Scenario cfg: " + cfg.toJson + "\n")
 
+    val avgSendingTime = if(sent.success == 0) 0 else sent.sendingDuration / sent.success
     ReportOutputModel(title = headContent,
       items = Seq(
         PlainText(s"Scenario ${scenario.nodes}*${scenario.scenarioName} ${scenario.scenarioState}. Start: ${startTimestampTxt}, stop: ${scenarioStopTimestampTxt}, ${rampUpRemainingTxt}ETA: ${remainingTimeSeconds} s"),
@@ -62,7 +63,7 @@ case class StatsSummary(mqttConnectAttempts: Int,
         PlainText(s"Sent successfully: ${sent.success}, failures: ${sent.failure}, total attempts: ${sent.attempts}. Retransmit publish: ${sent.publishRetransmitAttempts}, pubrel: ${sent.pubrelRetransmitAttempts}"),
         PlainText(s"Received: ${received.count} out of ${received.expectedCount}, success rate: ${fmt2(receiveSuccessPercent)} %, fan-out: ${fmt2(fanOutFactor)}"),
         PlainText(s"Tracking: success ${received.trackingSuccess}, missing ${received.trackingMissing}, unexpected ${received.trackingUnexpected}, error ${received.trackingError}"),
-        PlainText(s"Transmission duration: $msgTransferTimespanSeconds s"),
+        PlainText(s"Transmission duration: $msgTransferTimespanSeconds s, avg sending time: ${avgSendingTime}"),
         PlainText(s"Throughput avg: ${fmt2(avgThroughput)} msg/sec"),
         PlainText(s"Latency avg: ${latencyAvg}, max: ${latencyMax}, P50/75/95/99: ${latencyP50}/${latencyP75}/${latencyP95}/${latencyP99}"),
       ) ++
@@ -119,7 +120,8 @@ object StatsSummary {
                           publishRetransmitAttempts: Int,
                           pubrelRetransmitAttempts: Int,
                           firstTimestamp: Long,
-                          lastTimestamp: Long) {
+                          lastTimestamp: Long,
+                          sendingDuration: Long) {
     def agg(other: SentMessages): SentMessages = {
       if(this == SentMessages.empty)
         other
@@ -131,13 +133,14 @@ object StatsSummary {
         publishRetransmitAttempts = publishRetransmitAttempts + other.pubrelRetransmitAttempts,
         pubrelRetransmitAttempts = pubrelRetransmitAttempts + other.pubrelRetransmitAttempts,
         firstTimestamp = minNonZero(firstTimestamp, other.firstTimestamp),
-        lastTimestamp = Math.max(lastTimestamp, other.lastTimestamp)
+        lastTimestamp = Math.max(lastTimestamp, other.lastTimestamp),
+        sendingDuration = sendingDuration + other.sendingDuration
       )
     }
   }
 
   object SentMessages {
-    val empty = SentMessages(0, 0, 0, 0, 0, 0, 0)
+    val empty = SentMessages(0, 0, 0, 0, 0, 0, 0, 0)
 
     implicit val encoder: JsonEncoder[SentMessages] = DeriveJsonEncoder.gen[SentMessages]
     implicit val decoder: JsonDecoder[SentMessages] = DeriveJsonDecoder.gen[SentMessages]

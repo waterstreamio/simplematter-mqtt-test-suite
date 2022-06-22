@@ -42,7 +42,8 @@ class StatsStorageSpec extends AnyFlatSpec
     pubrelRetransmitAttempts <- Gen.chooseNum(0, 10000)
     firstTimestamp <- Gen.chooseNum(0L, 1000000000L)
     lastTimestamp <- Gen.chooseNum(firstTimestamp, 1000000000L)
-  } yield StatsSummary.SentMessages(attempts, success, failure, pubRetransmitAttempts, pubrelRetransmitAttempts, firstTimestamp, lastTimestamp)
+    sendingDuration <- Gen.chooseNum(0, 100000)
+  } yield StatsSummary.SentMessages(attempts, success, failure, pubRetransmitAttempts, pubrelRetransmitAttempts, firstTimestamp, lastTimestamp, sendingDuration)
 
   val statsReceivedMessagesGen = for {
     expectedCount <- Gen.chooseNum(0, 100000)

@@ -21,7 +21,9 @@ class StatsSummarySpec extends AnyFlatSpec with should.Matchers {
         publishRetransmitAttempts = 0,
         pubrelRetransmitAttempts = 0,
         firstTimestamp = 10000L,
-        lastTimestamp = 20000L),
+        lastTimestamp = 20000L,
+        sendingDuration = 30000
+      ),
       received = StatsSummary.ReceivedMessages(expectedCount = 1000,
         count = 1000,
         firstTimestamp = 10000L,

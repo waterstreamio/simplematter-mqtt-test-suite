@@ -82,5 +82,7 @@ trait FlightRecorder {
 }
 
 object FlightRecorder {
+  val live = ZIO.service[FlightRecorder]
+
   private val log = LoggerFactory.getLogger(classOf[FlightRecorder])
 }
