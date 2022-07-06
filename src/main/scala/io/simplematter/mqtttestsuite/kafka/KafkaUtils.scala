@@ -6,10 +6,9 @@ import io.simplematter.mqtttestsuite.config.KafkaConfig
 import io.simplematter.mqtttestsuite.model.{NodeId, NodeIndex}
 import org.apache.kafka.clients.consumer.OffsetAndMetadata
 import org.slf4j.LoggerFactory
-import zio.{Has, RIO, Task, ZIO}
+import zio.{RIO, Task, ZIO}
 import zio.ZLayer
-import zio.clock.Clock
-import zio.blocking.Blocking
+import zio.Clock
 import zio.kafka.admin.AdminClient
 import zio.kafka.admin.AdminClientSettings
 import zio.kafka.admin.AdminClient.ListOffsetsOptions
@@ -20,15 +19,16 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeoutException
 import scala.jdk.CollectionConverters.*
 import zio.Schedule
-import zio.duration.*
+import zio.Duration
 
 object KafkaUtils {
   private val log = LoggerFactory.getLogger(KafkaUtils.getClass)
 
-  def getThisNodePartitions(nodeIndex: NodeIndex, kafkaConfig: KafkaConfig, topicNames: Seq[String], maxWaitSeconds: Int): RIO[Clock with Blocking, Seq[CommonTopicPartition]] = {
+  def getThisNodePartitions(nodeIndex: NodeIndex, kafkaConfig: KafkaConfig, topicNames: Seq[String], maxWaitSeconds: Int): RIO[Clock, Seq[CommonTopicPartition]] = {
     val adminSettings = AdminClientSettings(kafkaConfig.bootstrapServersSeq.toList).withProperties(kafkaConfig.adminProperties)
-    AdminClient.make(adminSettings).use { adminClient =>
+    ZIO.scoped {
       for {
+        adminClient <- AdminClient.make(adminSettings)
         topicsDescription  <- adminClient.describeTopics(topicNames)
         _ = log.debug("getThisNodePartitions fetched description of topics {}: {}", topicNames, topicsDescription)
         allTopicsPartitions = topicsDescription.values.flatMap(topicDescription => topicDescription.partitions.map(pInfo => CommonTopicPartition(topicDescription.name, pInfo.partition))).toSeq.sortBy(_.toString)
@@ -40,17 +40,18 @@ object KafkaUtils {
 
   private def offsetsMapName(group: String) = s"kafka_offsets_${group}"
 
-  private def getOffsetsMap(group: String): RIO[Has[HazelcastInstance], IMap[CommonTopicPartition, Long | Null]] = {
+  private def getOffsetsMap(group: String): RIO[HazelcastInstance, IMap[CommonTopicPartition, Long | Null]] = {
     ZIO.service[HazelcastInstance].map { hz =>
       hz.getMap[CommonTopicPartition, Long | Null](offsetsMapName(group))
     }
   }
 
-  def getLatestOffsets(kafkaConfig: KafkaConfig, topicsPartitions: Iterable[CommonTopicPartition]): RIO[Blocking, Map[CommonTopicPartition, Long]] = {
+  def getLatestOffsets(kafkaConfig: KafkaConfig, topicsPartitions: Iterable[CommonTopicPartition]): Task[Map[CommonTopicPartition, Long]] = {
     if(topicsPartitions.nonEmpty) {
       val adminSettings = AdminClientSettings(kafkaConfig.bootstrapServersSeq.toList).withProperties(kafkaConfig.adminProperties)
-      AdminClient.make(adminSettings).use { adminClient =>
+      ZIO.scoped {
         for {
+          adminClient <- AdminClient.make(adminSettings)
           adminOffsets <-
             adminClient.listOffsets(topicsPartitions.map(tp => AdminTopicPartition(tp) -> AdminClient.OffsetSpec.LatestSpec).toMap)
         } yield adminOffsets.map((tp, offsetRes) => tp.asJava -> offsetRes.offset ).toMap

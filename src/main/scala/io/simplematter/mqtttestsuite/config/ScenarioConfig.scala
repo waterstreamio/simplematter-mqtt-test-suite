@@ -56,13 +56,16 @@ object ScenarioConfig {
 
     val scenarioName = typesafeConfig.getString("scenarioName")
     val cfgSource = TypesafeConfigSource.fromTypesafeConfig(ZIO.succeed(typesafeConfig))
-    zio.Runtime.default.unsafeRun(scenarioName match {
+
+    zio.Unsafe.unsafe {
+      zio.Runtime.default.unsafe.run(scenarioName match {
         case ScenarioConfig.MqttPublishOnly.name => read(MqttPublishOnly.automaticDescription from cfgSource)
         case ScenarioConfig.MqttToKafka.name => read(MqttToKafka.automaticDescription from cfgSource)
         case ScenarioConfig.KafkaToMqtt.name => read(KafkaToMqtt.automaticDescription from cfgSource)
         case ScenarioConfig.MqttToMqtt.name => read(MqttToMqtt.automaticDescription from cfgSource)
         case other => throw new TestSuiteInitializationException(s"Unknown scenario: ${other}")
-    })
+      }).getOrThrowFiberFailure()
+    }
   }
 
   //workaround for zio-config when there are many fields in the config classes:  no implicit argument of type zio.config.magnolia.Descriptor[ io.simplematter.mqtttestsuite.config².ScenariosConfig ] was found

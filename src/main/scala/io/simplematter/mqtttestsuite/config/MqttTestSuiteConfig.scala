@@ -13,7 +13,7 @@ import zio.json.*
 import zio.config.typesafe.*
 import zio.config.magnolia.*
 //import zio.config.magnolia.DeriveConfigDescriptor._
-import zio.duration.Duration
+import zio.Duration
 import io.simplematter.mqtttestsuite.util.singleParamMap
 import io.simplematter.mqtttestsuite.model.NodeId
 import io.simplematter.mqtttestsuite.exception.TestSuiteInitializationException
@@ -148,6 +148,11 @@ object MqttTestSuiteConfig {
   private val automaticDescription = descriptor[MqttTestSuiteConfig]
 
   def load(): MqttTestSuiteConfig = {
-    zio.Runtime.default.unsafeRun(read(automaticDescription from TypesafeConfigSource.fromResourcePath))
+    import zio.Unsafe.unsafe
+//    zio.Runtime.default.unsafeRun(read(automaticDescription from TypesafeConfigSource.fromResourcePath))
+
+    unsafe {
+      zio.Runtime.default.unsafe.run(read(automaticDescription from TypesafeConfigSource.fromResourcePath)).getOrThrowFiberFailure()
+    }
   }
 }

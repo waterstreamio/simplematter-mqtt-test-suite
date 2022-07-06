@@ -6,13 +6,12 @@ import io.simplematter.mqtttestsuite.util.QuantileApprox
 import io.simplematter.mqtttestsuite.config.{HazelcastConfig, MqttBrokerConfig}
 import io.simplematter.mqtttestsuite.util.*
 import org.slf4j.LoggerFactory
-import zio.{Fiber, RIO, Schedule, Task, UIO, URIO, ZIO, clock}
-import zio.clock.Clock
-import zio.duration.*
-import zio.Has
+import zio.{Fiber, RIO, Schedule, Task, UIO, URIO, ZIO}
+import zio.Clock
+import zio.Duration
 import zio.{RLayer, TaskLayer, ULayer, URLayer, ZLayer}
-import zio.json.*
-import zio.blocking.*
+import zio.json.{JsonEncoder, JsonDecoder}
+import zio.json._
 
 import java.util.concurrent.{ConcurrentHashMap, ConcurrentSkipListSet, TimeUnit}
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
@@ -58,7 +57,7 @@ class StatsStorage(nodeId: NodeId,
   private val latencySum: AtomicLong = AtomicLong(0)
   private val latencyMax: AtomicLong = AtomicLong(0)
 
-  private val sleepingInterval = 1.second
+  private val sleepingInterval = Duration.fromSeconds(1)
 
   private val quantileApprox = QuantileApprox(1, 10)
 
@@ -96,7 +95,7 @@ class StatsStorage(nodeId: NodeId,
   private val snapshotIdAcknowledged = AtomicLong(0)
 
   def scenarioRampUpStarted(scenarioName: String, rampUpDurationSeconds: Int, durationSeconds: Int): URIO[Clock, Unit] =
-    clock.currentTime(TimeUnit.MILLISECONDS).map { now =>
+    Clock.currentTime(TimeUnit.MILLISECONDS).map { now =>
       this.scenarioName = scenarioName
       this.scenarioState = ScenarioState.RampUp
       this.scenarioRampUpStartTimestamp = now
@@ -105,37 +104,37 @@ class StatsStorage(nodeId: NodeId,
     }
 
   def scenarioRunning(): URIO[Clock, Unit] =
-    clock.currentTime(TimeUnit.MILLISECONDS).map { now =>
+    Clock.currentTime(TimeUnit.MILLISECONDS).map { now =>
       scenarioState = ScenarioState.Running
       this.scenarioStartTimestamp = now
     }
 
   def scenarioDone(): URIO[Clock, Unit] =
-    clock.currentTime(TimeUnit.MILLISECONDS).map { now =>
+    Clock.currentTime(TimeUnit.MILLISECONDS).map { now =>
       scenarioState = ScenarioState.Done
       scenarioStopTimestamp = now
     }
 
   def scenarioFail(): URIO[Clock, Unit] =
-    clock.currentTime(TimeUnit.MILLISECONDS).map { now =>
+    Clock.currentTime(TimeUnit.MILLISECONDS).map { now =>
       scenarioState = ScenarioState.Fail
       scenarioStopTimestamp = now
     }
 
   def mqttConnectionsExpected(mqttConnections: Int): UIO[Unit] = {
-    UIO {
+    ZIO.attempt {
       mqttConnectionsExpected.set(mqttConnections)
-    }
+    }.ignoreLogged
   }
 
   def recordMqttConnect[R, A](clientId: ClientId, connect: RIO[R, A]): RIO[R with Clock, A] = {
     for {
-      _ <- ZIO {
+      _ <- ZIO.attempt {
         log.debug("MQTT connect attempt for {}", clientId)
         mqttConnectAttempts.incrementAndGet()
       }
-      connectOutcomeTimestamp <- clock.currentTime(TimeUnit.MILLISECONDS)
-      connectExit <- connect.run
+      connectOutcomeTimestamp <- Clock.currentTime(TimeUnit.MILLISECONDS)
+      connectExit <- connect.exit
       _ = connectExit.mapBoth({ err =>
         log.error(s"MQTT connect failed for ${clientId}", err)
         mqttConnectFailures.incrementAndGet()
@@ -154,7 +153,7 @@ class StatsStorage(nodeId: NodeId,
 
   def mqttConnectionClosed(clientId: ClientId, wasAccepted: Boolean): URIO[Clock, Unit] = {
     for {
-      disconnectTimestamp <- clock.currentTime(TimeUnit.MILLISECONDS)
+      disconnectTimestamp <- Clock.currentTime(TimeUnit.MILLISECONDS)
       remainingActive = if(wasAccepted) mqttConnectionsActive.decrementAndGet() else mqttConnectionsActive.get()
       _ = mqttConnectionsClosed.incrementAndGet()
       _ = log.debug("MQTT connection closed for {}. wasAccepted={}, remainingActive={}", clientId, wasAccepted, remainingActive)
@@ -164,7 +163,7 @@ class StatsStorage(nodeId: NodeId,
 
   def scheduledUptime(clientId: ClientId): URIO[Clock, Unit] = {
     for {
-      timestamp <- clock.currentTime(TimeUnit.MILLISECONDS)
+      timestamp <- Clock.currentTime(TimeUnit.MILLISECONDS)
       _ = log.debug("MQTT scheduled uptime for {}", clientId)
       _ = addClientEvent(clientId, ClientScheduledUptime(timestamp))
     } yield ()
@@ -172,16 +171,16 @@ class StatsStorage(nodeId: NodeId,
 
   def scheduledDowntime(clientId: ClientId): URIO[Clock, Unit] = {
     for {
-      timestamp <- clock.currentTime(TimeUnit.MILLISECONDS)
+      timestamp <- Clock.currentTime(TimeUnit.MILLISECONDS)
       _ = log.debug("MQTT scheduled downtime for {}", clientId)
       _ = addClientEvent(clientId, ClientScheduledDowntime(timestamp))
     } yield ()
   }
 
 
-  def recordMessageSend[R, A](id: MessageId, send: RIO[R, A], topic: MqttTopicName, recepients: Option[Iterable[ClientId]]): RIO[R with Clock with Blocking, A] = {
+  def recordMessageSend[R, A](id: MessageId, send: RIO[R, A], topic: MqttTopicName, recepients: Option[Iterable[ClientId]]): RIO[R with Clock, A] = {
     for {
-      sendStartTimestamp <- clock.currentTime(TimeUnit.MILLISECONDS)
+      sendStartTimestamp <- Clock.currentTime(TimeUnit.MILLISECONDS)
       _ = messagesSendAttempts.incrementAndGet()
       _ = messageSentFirstTimestamp.updateAndGet(minNonZero(sendStartTimestamp, _))
       _ = messageSentLastTimestamp.updateAndGet(Math.max(sendStartTimestamp, _))
@@ -190,11 +189,11 @@ class StatsStorage(nodeId: NodeId,
         messagesSendFailure.incrementAndGet()
         log.info(s"Message sending failure ${id} ${sendStartTimestamp}", sendErr)
         sendErr
-      }.onInterrupt(_ => URIO {
+      }.onInterrupt(_ => ZIO.attempt {
         log.info(s"Message sending interrupt ${id} ${sendStartTimestamp}" )
         messagesSendInterrupts.incrementAndGet()
-      })
-      sendEndTimestamp <- clock.currentTime(TimeUnit.MILLISECONDS)
+      }.ignoreLogged)
+      sendEndTimestamp <- Clock.currentTime(TimeUnit.MILLISECONDS)
       _ = messageSendingDurationTotal.addAndGet(sendEndTimestamp - sendStartTimestamp)
       _ = messagesSendSuccess.incrementAndGet()
       fanOutFactor = recepients.fold(1)(_.size)
@@ -350,7 +349,7 @@ class StatsStorage(nodeId: NodeId,
   }
 
   override def mqttSubscribeAcknowledged(clientId: ClientId, topicsWithCodes: Seq[(String, Int)]): URIO[Clock, Unit] = {
-    clock.currentTime(TimeUnit.MILLISECONDS).map { now =>
+    Clock.currentTime(TimeUnit.MILLISECONDS).map { now =>
       val errCount = topicsWithCodes.count {(_, code) => MqttUtils.isSubAckError(code) }
       mqttSubscribePatternsError.addAndGet(errCount)
       mqttSubscribePatternsSuccess.addAndGet(topicsWithCodes.size - errCount)
@@ -451,7 +450,7 @@ class StatsStorage(nodeId: NodeId,
    * @return
    */
   def waitCompletion(timeout: Duration): RIO[Clock, Boolean]  = {
-    ZIO {
+    ZIO.attempt {
       val sent = aggregatedMessagesSent.get()
       val expected = aggregatedMessagesExpected.get()
       val received = aggregatedMessagesReceived.get()
@@ -482,13 +481,13 @@ class StatsStorage(nodeId: NodeId,
         }
   }
 
-  private def publishStats(): RIO[Blocking, Unit] = {
-    effectBlocking {
+  private def publishStats(): Task[Unit] = {
+    ZIO.attemptBlocking {
       statsReportingTopic.publish(getSnapshot().toJson)
     }
   }
 
-  private def statsPublishingLoop(interval: Duration): RIO[Clock with Blocking, Unit] = {
+  private def statsPublishingLoop(interval: Duration): RIO[Clock, Unit] = {
     publishStats()
       .repeat(Schedule.spaced(interval))
       .onInterrupt(publishStats().logExceptions("Final stats report failed", log, ()))
@@ -556,7 +555,7 @@ class StatsStorage(nodeId: NodeId,
   }
 
   private def detectErrors(): RIO[Clock, Unit]  = {
-    clock.currentTime(TimeUnit.MILLISECONDS).map { now =>
+    Clock.currentTime(TimeUnit.MILLISECONDS).map { now =>
       val timestampThreshold = Math.max(now - statsConfig.considerMessageMissingTimeoutMillis, 0)
       log.debug("Checking the stats for errors detection")
 
@@ -620,14 +619,14 @@ class StatsStorage(nodeId: NodeId,
   private def errorsDetectionLoop(): RIO[Clock, Unit] = {
     if(statsConfig.individualMessageTracking) {
       detectErrors()
-        .repeat(Schedule.spaced(statsConfig.errorsDetectionLoopIntervalMillis.milliseconds))
-        .ensuring(for {
-            _ <- URIO { log.debug("Final errors detection started")}
+        .repeat(Schedule.spaced(Duration.fromMillis(statsConfig.errorsDetectionLoopIntervalMillis)))
+        .ensuring((for {
+            _ <- ZIO.attempt { log.debug("Final errors detection started")}
             _ <- detectErrors().logExceptions("Final errors detection failed", log, ())
-          } yield ()).unit
+          } yield ()).ignoreLogged).unit
     } else {
       log.debug("Individual message tracking disabled, no need for the errors detection loop")
-      RIO.succeed(())
+      ZIO.succeed(())
     }
   }
 
@@ -722,30 +721,56 @@ object StatsStorage {
             statsConfig: StatsConfig,
             statsReportingInterval: Duration,
             mqttBrokerConfig: MqttBrokerConfig,
-            scenarioConfig: ScenarioConfig): RLayer[Has[HazelcastInstance] with Clock with Blocking, Has[StatsStorage] with Has[FlightRecorder]] = {
-    ZLayer.fromAcquireReleaseMany[Has[HazelcastInstance] with Clock with Blocking, Throwable, (Has[StatsStorage] with Has[FlightRecorder], Fiber[Throwable, Any])] {
-      for {hz <- ZIO.service[HazelcastInstance]
-           _ = log.debug("statsConfig: {}", statsConfig)
-           storage = StatsStorage(nodeId, statsConfig, hz, mqttBrokerConfig, scenarioConfig)
-           mqttBrokerConfigMap = hz.getMap[NodeId, String](mqttBrokerConfigMapName)
-           scenarioConfigMap = hz.getMap[NodeId, String](scenarioConfigMapName)
-           _ = mqttBrokerConfigMap.put(nodeId, mqttBrokerConfig.toJson)
-           _ = scenarioConfigMap.put(nodeId, scenarioConfig.toJson)
-           publishingFiber <- storage.statsPublishingLoop(statsReportingInterval).interruptible.fork
-           errorDetectionFiber <- storage.errorsDetectionLoop().interruptible.fork
-           _ = storage.listenForUpdates()
-           } yield (Has.allOf[StatsStorage, FlightRecorder](storage, storage), publishingFiber.zip(errorDetectionFiber))
-  } { res =>
-      //TODO terminate all StatsStorage activities here, release all the fibers
-      for {
-        _ <- ZIO.succeed(())
-        _ = log.debug("Shutting down StatsStorage background activities")
-        _ <- res._2.interrupt
-      } yield ()
-    }.map (_._1)
+            scenarioConfig: ScenarioConfig): RLayer[HazelcastInstance with Clock, StatsStorage with FlightRecorder] = {
+    ZLayer.scoped {
+      ZIO.acquireRelease({
+        for {hz <- ZIO.service[HazelcastInstance]
+             _ = log.debug("statsConfig: {}", statsConfig)
+             storage = StatsStorage(nodeId, statsConfig, hz, mqttBrokerConfig, scenarioConfig)
+             mqttBrokerConfigMap = hz.getMap[NodeId, String](mqttBrokerConfigMapName)
+             scenarioConfigMap = hz.getMap[NodeId, String](scenarioConfigMapName)
+             _ = mqttBrokerConfigMap.put(nodeId, mqttBrokerConfig.toJson)
+             _ = scenarioConfigMap.put(nodeId, scenarioConfig.toJson)
+             publishingFiber <- storage.statsPublishingLoop(statsReportingInterval).interruptible.fork
+             errorDetectionFiber <- storage.errorsDetectionLoop().interruptible.fork
+             _ = storage.listenForUpdates()
+//             } yield (Has.allOf[StatsStorage, FlightRecorder](storage, storage), publishingFiber.zip(errorDetectionFiber))
+        } yield (zio.ZEnvironment(storage, storage), publishingFiber.zip(errorDetectionFiber))
+    })({
+        res =>
+          //TODO terminate all StatsStorage activities here, release all the fibers
+          for {
+            _ <- ZIO.succeed(())
+            _ = log.debug("Shutting down StatsStorage background activities")
+            _ <- res._2.interrupt
+          } yield ()
+      }).map(_._1.get)
+    }
   }
 
-  def waitCompletion(timeout: Duration): RIO[Clock with Has[StatsStorage], Boolean] =
+//    ZLayer.fromAcquireReleaseMany[HazelcastInstance with Clock, Throwable, (StatsStorage with FlightRecorder, Fiber[Throwable, Any])] {
+//      for {hz <- ZIO.service[HazelcastInstance]
+//           _ = log.debug("statsConfig: {}", statsConfig)
+//           storage = StatsStorage(nodeId, statsConfig, hz, mqttBrokerConfig, scenarioConfig)
+//           mqttBrokerConfigMap = hz.getMap[NodeId, String](mqttBrokerConfigMapName)
+//           scenarioConfigMap = hz.getMap[NodeId, String](scenarioConfigMapName)
+//           _ = mqttBrokerConfigMap.put(nodeId, mqttBrokerConfig.toJson)
+//           _ = scenarioConfigMap.put(nodeId, scenarioConfig.toJson)
+//           publishingFiber <- storage.statsPublishingLoop(statsReportingInterval).interruptible.fork
+//           errorDetectionFiber <- storage.errorsDetectionLoop().interruptible.fork
+//           _ = storage.listenForUpdates()
+//           } yield (Has.allOf[StatsStorage, FlightRecorder](storage, storage), publishingFiber.zip(errorDetectionFiber))
+//  } { res =>
+//      //TODO terminate all StatsStorage activities here, release all the fibers
+//      for {
+//        _ <- ZIO.succeed(())
+//        _ = log.debug("Shutting down StatsStorage background activities")
+//        _ <- res._2.interrupt
+//      } yield ()
+//    }.map (_._1)
+//  }
+
+  def waitCompletion(timeout: Duration): RIO[Clock with StatsStorage, Boolean] =
       ZIO.service[StatsStorage].flatMap(_.waitCompletion(timeout))
 
   /**
@@ -753,7 +778,7 @@ object StatsStorage {
    *
    * @return
    */
-  def finalizeStats(): RIO[Blocking with Clock with Has[StatsStorage], Unit] =
+  def finalizeStats(): RIO[Clock with StatsStorage, Unit] =
     ZIO.service[StatsStorage].flatMap { statsStorage =>
       for {
         _ <- statsStorage.detectErrors()

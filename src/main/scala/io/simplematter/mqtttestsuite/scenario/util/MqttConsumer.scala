@@ -7,12 +7,12 @@ import io.simplematter.mqtttestsuite.model.ClientId
 import io.simplematter.mqtttestsuite.stats.FlightRecorder
 import io.simplematter.mqtttestsuite.util.{ErrorInjector, MessageGenerator}
 import org.slf4j.LoggerFactory
-import zio.{Fiber, Has, RIO, Semaphore, URIO, ZIO, ZQueue, clock}
-import zio.clock.Clock
+import zio.{Fiber, RIO, Semaphore, URIO, ZIO}
+import zio.Clock
 
 import java.nio.charset.{Charset, StandardCharsets}
 import java.util.concurrent.{TimeUnit, TimeoutException}
-import zio.duration.*
+import zio.Duration
 
 import scala.concurrent.Promise
 
@@ -32,22 +32,25 @@ class MqttConsumer private(mqttBrokerConfig: MqttBrokerConfig,
   private val connectedAndSubscribedPromise = Promise[Unit]()
 
   private def attachMessageHandlers(): URIO[Clock, Unit] = {
-    URIO.runtime[Clock].map { env =>
+    ZIO.runtime[Clock].map { env =>
       client.onIncomingPublish { msg =>
         val handlerEffect = for {
-          now <- clock.currentTime(TimeUnit.MILLISECONDS)
+          now <- Clock.currentTime(TimeUnit.MILLISECONDS)
           payloadStr = msg.payload().toString(StandardCharsets.UTF_8)
           _ = log.trace("Raw incoming message: {}", payloadStr)
-          (messageId, sendingTimestamp) <- MessageGenerator.unpackMessagePrefix(payloadStr)
+          msgPrefix <- MessageGenerator.unpackMessagePrefix(payloadStr)
+          (messageId, sendingTimestamp) = msgPrefix
           _ = log.debug("Received a message: client={}, topic={}, id={}, sent={}, rec={}", clientId, msg.variableHeader().topicName(), messageId, sendingTimestamp, now)
           _ <- flightRecorder.messageReceived(messageId, msg.variableHeader().topicName(), clientId, sendingTimestamp, now)
         } yield ()
-        env.unsafeRunToFuture(errorInjector.receiveMessage(handlerEffect))
+        zio.Unsafe.unsafe {
+          env.unsafe.runToFuture(errorInjector.receiveMessage(handlerEffect))
+        }
       }
     }
   }
 
-  def waitForSubscribe(timeout: Duration = 30.seconds): RIO[Clock, Unit] = {
+  def waitForSubscribe(timeout: Duration = Duration.fromSeconds(30)): RIO[Clock, Unit] = {
     ZIO.fromPromiseScala(connectedAndSubscribedPromise).timeoutFail(TimeoutException(s"Timeout waiting for client ${clientId} connect and subscribe"))(timeout)
   }
 
@@ -56,7 +59,7 @@ class MqttConsumer private(mqttBrokerConfig: MqttBrokerConfig,
    */
   override protected val onConnect: URIO[Clock, Unit] = {
     (for {
-      _ <- ZIO {log.debug("Subscribing {} to {}", clientId, topicPatterns)}
+      _ <- ZIO.attempt { log.debug("Subscribing {} to {}", clientId, topicPatterns) }
       _ <- flightRecorder.mqttSubscribeSent(clientId, topicPatterns)
       subackCodes <- ZIO.fromFuture { implicit ec =>
         client.subscribe(topicPatterns.map(pattern => MqttTopicSubscription(pattern, qos)))
@@ -69,7 +72,7 @@ class MqttConsumer private(mqttBrokerConfig: MqttBrokerConfig,
           log.error(s"Suback with error code ${code} for pattern ${pattern} for MQTT client ${clientId}")
       )
     } yield ()).catchAll { err =>
-      URIO.succeed {
+      ZIO.succeed {
         log.error(s"Failed to subscribe MQTT client ${clientId} to the topic patterns ${topicPatterns}", err)
       }
     }
@@ -87,7 +90,7 @@ object MqttConsumer {
            qos: MqttQoS,
            topicPatterns: Seq[String],
            errorInjector: ErrorInjector
-          ): URIO[Has[FlightRecorder] with Clock, MqttConsumer] = {
+          ): URIO[FlightRecorder with Clock, MqttConsumer] = {
     for {
       flightRecorder <- ZIO.service[FlightRecorder]
       clientConnectMutex <- Semaphore.make(1)

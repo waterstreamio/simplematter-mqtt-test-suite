@@ -8,9 +8,9 @@ import io.simplematter.mqtttestsuite.model.{ClientId, GroupedTopics, NodeId, Nod
 import io.simplematter.mqtttestsuite.scenario.MqttToKafkaScenario.log
 import io.simplematter.mqtttestsuite.util.{ErrorInjector, MessageGenerator}
 import org.slf4j.LoggerFactory
-import zio.clock.Clock
-import zio.duration.*
-import zio.{Fiber, Has, IO, Promise, RIO, Ref, Runtime, Task, UIO, ZIO, clock}
+import zio.Clock
+import zio.Duration
+import zio.{Fiber, IO, Promise, RIO, Ref, Runtime, Task, UIO, ZIO}
 
 import java.util.concurrent.TimeUnit
 import scala.concurrent.Future
@@ -35,11 +35,11 @@ class MqttPublishOnlyScenario(stepInterval: Duration,
 
   override def start(): RIO[ScenarioEnv, Fiber[Any, Any]] = {
     for {
-      _ <- RIO { log.info(s"Start the scenario for node ${nodeId}") }
+      _ <- ZIO.attempt { log.info(s"Start the scenario for node ${nodeId}") }
       c <- rampUpClients()
-      startTime <- clock.currentTime(TimeUnit.MILLISECONDS)
-      _ <- clock.sleep(scenarioConfig.durationSeconds.seconds)
-      stopTime <- clock.currentTime(TimeUnit.MILLISECONDS)
+      startTime <- Clock.currentTime(TimeUnit.MILLISECONDS)
+      _ <- Clock.sleep(Duration.fromSeconds(scenarioConfig.durationSeconds))
+      stopTime <- Clock.currentTime(TimeUnit.MILLISECONDS)
       _ = log.info(s"Stopping scenario after ${(stopTime - startTime)/1000} s")
       _ <- MqttPublisher.disconnectAll(c)
       _ = log.debug("Disconnected all MQTT clients")
@@ -50,11 +50,11 @@ class MqttPublishOnlyScenario(stepInterval: Duration,
 
   private def rampUpClients(): RIO[ScenarioEnv, Seq[MqttPublisher]] = {
     val res = for {
-      startTimestamp <- clock.currentTime(TimeUnit.MILLISECONDS)
+      startTimestamp <- Clock.currentTime(TimeUnit.MILLISECONDS)
       clientsNumber <- Ref.make[Int](0)
       allPublishers <- Ref.make(Seq.empty[MqttPublisher])
       rampUpComplete <- Promise.make[Nothing, Unit]
-      publishingStart = if(scenarioConfig.actionsDuringRampUp) Task.succeed(()) else rampUpComplete.await
+      publishingStart = if(scenarioConfig.actionsDuringRampUp) ZIO.succeed(()) else rampUpComplete.await
       finalizing <- Promise.make[Nothing, Unit]
       publishers <- spawnMqttPublisher(clientsNumber, publishingStart, finalizing).
         flatMap { spawnedPublisher =>
@@ -63,7 +63,7 @@ class MqttPublishOnlyScenario(stepInterval: Duration,
         flatMap { _ => delayAfterPublisherSpawn(startTimestamp, clientsNumber) }.
         flatMap(_ => clientsNumber.get).
         repeatUntil(_ >= scenarioConfig.publishingClientsNumber)
-      stopTimestamp <- clock.currentTime(TimeUnit.MILLISECONDS)
+      stopTimestamp <- Clock.currentTime(TimeUnit.MILLISECONDS)
       _ = log.debug(s"All publishers spawned: ${publishers}, all=${allPublishers}, ramp up actual duration = ${stopTimestamp - startTimestamp}")
       _ <- rampUpComplete.succeed(())
       p <- allPublishers.get
@@ -75,11 +75,11 @@ class MqttPublishOnlyScenario(stepInterval: Duration,
   private def delayAfterPublisherSpawn(startTimestamp: Long, clientsNumber: Ref[Int]): RIO[Clock, Unit] = {
     for {
       n <- clientsNumber.get
-      now <- clock.currentTime(TimeUnit.MILLISECONDS)
+      now <- Clock.currentTime(TimeUnit.MILLISECONDS)
       tNext = scenarioConfig.rampUpSeconds * 1000L * n / scenarioConfig.publishingClientsNumber + startTimestamp
-      delay = (if(n >= scenarioConfig.publishingClientsNumber || tNext < now) 0 else tNext - now).milliseconds
+      delay = Duration.fromMillis(if(n >= scenarioConfig.publishingClientsNumber || tNext < now) 0 else tNext - now)
       _ = log.debug("Sleeping for {}, current clients {}", delay, n)
-      _ <- clock.sleep(delay)
+      _ <- Clock.sleep(delay)
     } yield ()
   }
 
@@ -104,7 +104,7 @@ class MqttPublishOnlyScenario(stepInterval: Duration,
         )
       }
       _ = log.debug(s"Publisher ${p.clientId} created")
-      _ <- p.maintainConnection(finalizing, mqttBrokerConfig.statusCheckIntervalSeconds.seconds).fork
+      _ <- p.maintainConnection(finalizing, Duration.fromSeconds(mqttBrokerConfig.statusCheckIntervalSeconds)).fork
       _ <- publishingStart.zipRight {
         log.debug("Start sending the messages")
         p.sendMessages()

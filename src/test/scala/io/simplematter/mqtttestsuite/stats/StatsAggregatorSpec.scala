@@ -10,12 +10,13 @@ import org.scalatest.matchers.should
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
-import zio.{Exit, Has, ZEnv, ZIO, clock}
-import zio.clock.Clock
-import zio.test.environment.TestClock
-import zio.duration.*
-import io.simplematter.mqtttestsuite.model.{MessageId, NodeId, ClientId, MqttTopicName}
+import zio.{Exit, ZIO}
+import zio.Clock
+import zio.test.TestClock
+import zio.Duration
+import io.simplematter.mqtttestsuite.model.{ClientId, MessageId, MqttTopicName, NodeId}
 
+import java.time.Instant
 import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
 import scala.util.Random
 
@@ -66,28 +67,28 @@ class StatsAggregatorSpec extends AnyFlatSpec
     val nextBucketPercent = 10
     val expectedAccuracy = 0.05
 
-    val testLayer = zio.test.environment.testEnvironment
-
     val messagesTimestamp = ConcurrentHashMap[MessageId, Long]()
 
     forAll(testData) { (samples1: Seq[(Long, MessageId)], samples2: Seq[(Long, MessageId)]) =>
       def recordMessages(recorder: FlightRecorder, messages: Seq[(Long, MessageId)]): Unit = {
         val testEff = for {
-            _ <- TestClock.setTime((maxValue * 100).millisecond) //Give space for calculating the latency
+            _ <- TestClock.setTime(Instant.ofEpochMilli(maxValue * 100)) //Give space for calculating the latency
             _ <- ZIO.collectAll(messages.map { (latency, id) =>
               for {
-                newNow <- clock.currentTime(TimeUnit.MILLISECONDS)
+                newNow <- Clock.currentTime(TimeUnit.MILLISECONDS)
                 prevNow = messagesTimestamp.putIfAbsent(id, newNow) //To make sure same message gets sent at the same timestamp for both recorders
                 agreedNow = messagesTimestamp.get(id)
-                _ <- TestClock.setTime(agreedNow.millisecond)
+                _ <- TestClock.setTime(Instant.ofEpochMilli(agreedNow))
                 _ <- recorder.recordMessageSend(id, ZIO.succeed(()), MqttTopicName("fakeTopic"), None)
-                _ <- TestClock.adjust(latency.millisecond)
+                _ <- TestClock.adjust(Duration.fromMillis(latency))
                 _ <- recorder.messageReceived(id, "fakeTopic", client3Id, agreedNow - latency, agreedNow)
               } yield()
             })
           } yield ()
 
-          zio.Runtime.default.unsafeRunSync(testEff.provideLayer(testLayer))
+        zio.Unsafe.unsafe {
+          zio.Runtime.default.unsafe.run(testEff.provide(zio.test.testEnvironment, TestClock.default))
+        }
       }
 
       val storage1 = new StatsStorage(NodeId("node1"), sampleStatsConfig, hz1, sampleMqttBrokerConfig, sampleScnearioConfig)

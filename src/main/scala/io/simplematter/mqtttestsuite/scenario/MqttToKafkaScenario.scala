@@ -9,11 +9,8 @@ import io.simplematter.mqtttestsuite.stats.FlightRecorder
 import io.simplematter.mqtttestsuite.util.{ErrorInjector, MessageGenerator}
 import io.simplematter.mqtttestsuite.model.{ClientId, GroupedTopics, MqttTopicName, NodeId, NodeIndex}
 import org.slf4j.LoggerFactory
-import zio.{Fiber, Has, IO, Promise, RIO, Ref, Runtime, Schedule, Task, UIO, URIO, ZIO, ZLayer, ZManaged, clock}
+import zio.{Clock, Duration, Executor, Fiber, IO, Promise, RIO, Ref, Runtime, Schedule, Scope, Task, UIO, URIO, ZIO, ZLayer}
 import zio.stream.{ZSink, ZStream}
-import zio.duration.*
-import zio.clock.Clock
-import zio.blocking.Blocking
 
 import java.util.concurrent.{ConcurrentHashMap, LinkedBlockingQueue, ThreadPoolExecutor, TimeUnit}
 import scala.concurrent.Future
@@ -21,7 +18,6 @@ import zio.kafka.serde.Serde
 import zio.kafka.consumer.{Consumer, ConsumerSettings, Subscription}
 import Consumer.OffsetRetrieval
 import org.apache.kafka.common.TopicPartition
-import zio.internal.Executor
 
 import java.nio.file.Path
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
@@ -49,7 +45,7 @@ class MqttToKafkaScenario(stepInterval: Duration,
   private val kafkaClientId = ClientId("kafka-"+nodeId)
 
   //To make sure that reading doesn't compete for the resources with the publishing
-  private val kafkaReadingExecutor = Executor.fromThreadPoolExecutor(_ => 1024)(new ThreadPoolExecutor(
+  private val kafkaReadingExecutor = zio.Executor.fromThreadPoolExecutor(new ThreadPoolExecutor(
     2, 10, 10, TimeUnit.SECONDS, new LinkedBlockingQueue[Runnable]()
   ))
 
@@ -76,12 +72,12 @@ class MqttToKafkaScenario(stepInterval: Duration,
         expectedRecepients = noneRecepients
       )
       _ <- flightRecorder.scenarioRunning()
-      startTime <- clock.currentTime(TimeUnit.MILLISECONDS)
-      _ <- clock.sleep(scenarioConfig.durationSeconds.seconds)
+      startTime <- Clock.currentTime(TimeUnit.MILLISECONDS)
+      _ <- Clock.sleep(Duration.fromSeconds(scenarioConfig.durationSeconds))
       _ <- finalizingScenario.succeed(())
       //TODO consider waiting here until publishing actually completes. Currently, StatsStorage.waitCompletion makes sure that the transmission completes before final stats.
       _ <- flightRecorder.scenarioDone()
-      stopTime <- clock.currentTime(TimeUnit.MILLISECONDS)
+      stopTime <- Clock.currentTime(TimeUnit.MILLISECONDS)
       _ = log.info(s"Stopped scenario after ${(stopTime - startTime)/1000} s")
       connectionsFiber = Fiber.collectAll(publishersWithConnections.map { case (_, mcFiber) => mcFiber})
       _ <- connectionsFiber.await.map { res =>
@@ -98,28 +94,28 @@ class MqttToKafkaScenario(stepInterval: Duration,
   private def subscribeKafkaWithFixedPartitions(): RIO[ScenarioEnv, Unit] = {
     val offsetsCache = KafkaOffsetsCache(kafkaConfig, "mqtt2kafka")
 
-    val consumerLayer = ZLayer.fromManaged(for {
-      hz <- ZManaged.service[HazelcastInstance]
-      blocking <- ZManaged.service[Blocking.Service]
+    val consumerLayer = ZLayer.fromZIO(for {
+      hz <- ZIO.service[HazelcastInstance]
       consumerSettings: ConsumerSettings =
         ConsumerSettings(kafkaConfig.bootstrapServersSeq.toList)
           .withProperties(kafkaConfig.consumerProperties)
-          .withPollInterval(0.milliseconds) /* iterate as fast as possible, relying on pollTimeout for sleeping */
+          .withPollInterval(Duration.fromMillis(0)) /* iterate as fast as possible, relying on pollTimeout for sleeping */
           .withPollTimeout(kafkaConfig.pollTimeout)
-          .withOffsetRetrieval(OffsetRetrieval.Manual { topicsPartitions => offsetsCache.getOffsets(topicsPartitions).provide(Has(blocking)) })
+          .withOffsetRetrieval(OffsetRetrieval.Manual { topicsPartitions => offsetsCache.getOffsets(topicsPartitions) })
       kafkaConsumer <- Consumer.make(consumerSettings)
     } yield kafkaConsumer)
 
-    def streamExec(thisNodeTopicPartitions: Set[TopicPartition]): RIO[Has[Consumer] with Clock with Blocking with Has[FlightRecorder] with Has[HazelcastInstance], Unit] = for {
+    def streamExec(thisNodeTopicPartitions: Set[TopicPartition]): RIO[Consumer with Clock with FlightRecorder with HazelcastInstance, Unit] = for {
       flightRecorder <- ZIO.service[FlightRecorder]
 
       _ <- Consumer.subscribeAnd(Subscription.Manual(thisNodeTopicPartitions))
         .plainStream(Serde.string, Serde.string)
-        .mapM { rec =>
+        .mapZIO { rec =>
           ((for {
-            now <- clock.currentTime(TimeUnit.MILLISECONDS)
+            now <- Clock.currentTime(TimeUnit.MILLISECONDS)
             receivingTimestamp = if (scenarioConfig.useKafkaTimestampForLatency) rec.timestamp else now
-            (messageId, sendingTimestamp) <- MessageGenerator.unpackMessagePrefix(rec.value)
+            msgPrefix <- MessageGenerator.unpackMessagePrefix(rec.value)
+            (messageId, sendingTimestamp) = msgPrefix
             _ <- flightRecorder.messageReceived(messageId, rec.record.topic() + " " + rec.key, kafkaClientId, sendingTimestamp, receivingTimestamp)
             _ = if(log.isDebugEnabled())
               log.debug("Received Kafka message: id={}, topic={}, partition={}, key={}, endToEndLatency={}, mqttToKafkaLatency={}", messageId, rec.record.topic(), rec.record.partition(), rec.key, receivingTimestamp-sendingTimestamp, receivingTimestamp - rec.timestamp)
@@ -133,14 +129,17 @@ class MqttToKafkaScenario(stepInterval: Duration,
         }.runDrain
     } yield ()
 
-    for {
-      //TODO configurable timeout
-      thisNodeTopicPartitions <- KafkaUtils.getThisNodePartitions(nodeIndex, kafkaConfig, scenarioConfig.kafkaTopicsSeq, 30).map(_.toSet)
-      //Init offsets cache before starting the message reading loop
-      _ <- offsetsCache.getOffsets(thisNodeTopicPartitions)
-      /* We can only fork here due to strange zio-kafka behavior - it doesn't start consuming if forked before provideSomeLayer */
-      _ <- streamExec(thisNodeTopicPartitions).provideSomeLayer[ScenarioEnv](consumerLayer).lock(kafkaReadingExecutor).fork
-    } yield ()
+    ZIO.scoped {
+      for {
+        //TODO configurable timeout
+        thisNodeTopicPartitions <- KafkaUtils.getThisNodePartitions(nodeIndex, kafkaConfig, scenarioConfig.kafkaTopicsSeq, 30).map(_.toSet)
+        //Init offsets cache before starting the message reading loop
+        _ <- offsetsCache.getOffsets(thisNodeTopicPartitions)
+        /* We can only fork here due to strange zio-kafka behavior - it doesn't start consuming if forked before provideSomeLayer */
+        //      _ <- streamExec(thisNodeTopicPartitions).provideSomeLayer[ScenarioEnv](consumerLayer).lock(kafkaReadingExecutor).fork
+        _ <- streamExec(thisNodeTopicPartitions).provideSome[ScenarioEnv with Scope](consumerLayer).onExecutor(kafkaReadingExecutor).fork
+      } yield ()
+    }
   }
 }
 

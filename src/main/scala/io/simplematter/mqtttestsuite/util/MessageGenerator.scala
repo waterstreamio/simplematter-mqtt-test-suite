@@ -1,8 +1,8 @@
 package io.simplematter.mqtttestsuite.util
 
 import scala.util.Random
-import zio.Task
-import io.simplematter.mqtttestsuite.model.{GroupedTopics, NodeIndex, MqttTopicName, MessageId}
+import zio.{Task, ZIO}
+import io.simplematter.mqtttestsuite.model.{GroupedTopics, MessageId, MqttTopicName, NodeIndex}
 
 object MessageGenerator {
 
@@ -82,7 +82,7 @@ object MessageGenerator {
     val timestampStr = packedMessage.drop(messageIdStr.length + 1).takeWhile(!_.isWhitespace)
     for {
       messageId <- MessageId.fromString(messageIdStr)
-      timestamp <- Task.effect(timestampStr.toLong)
+      timestamp <- ZIO.attempt(timestampStr.toLong)
     } yield (messageId, timestamp)
   }
 

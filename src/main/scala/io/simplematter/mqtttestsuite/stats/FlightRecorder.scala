@@ -1,10 +1,8 @@
 package io.simplematter.mqtttestsuite.stats
 
 import org.slf4j.LoggerFactory
-import zio.clock.Clock
+import zio.Clock
 import zio.{RIO, UIO, URIO, ZIO}
-import zio.clock
-import zio.blocking.Blocking
 
 import java.util.concurrent.TimeUnit
 import io.simplematter.mqtttestsuite.model.{ClientId, MessageId, MqttTopicName}
@@ -51,7 +49,7 @@ trait FlightRecorder {
    * @param recepients expected recepients (if can be tracked)
    * @return
    */
-  def recordMessageSend[R, A](id: MessageId, send : RIO[R, A], topic: MqttTopicName, recepients: Option[Iterable[ClientId]]): RIO[R with Clock with Blocking, A]
+  def recordMessageSend[R, A](id: MessageId, send : RIO[R, A], topic: MqttTopicName, recepients: Option[Iterable[ClientId]]): RIO[R with Clock, A]
 
   /**
    *

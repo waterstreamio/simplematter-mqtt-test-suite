@@ -2,7 +2,7 @@ package io.simplematter.mqtttestsuite
 
 import io.simplematter.mqtttestsuite.scenario.ScenarioState
 import zio.json.{JsonDecoder, JsonEncoder}
-import zio.Task
+import zio.{ZIO, Task}
 
 package object model {
   opaque type NodeId = String
@@ -47,9 +47,9 @@ package object model {
     def fromString(str: String): Task[MessageId] = {
       //for performance reasons, validation is simplified
       if(str.contains(clientIdDelimiter))
-        Task.succeed(str)
+        ZIO.succeed(str)
       else
-        Task.fail(IllegalArgumentException(s"MessageId must contain ${clientIdDelimiter}"))
+        ZIO.fail(IllegalArgumentException(s"MessageId must contain ${clientIdDelimiter}"))
     }
 
     extension (messageId: MessageId) {

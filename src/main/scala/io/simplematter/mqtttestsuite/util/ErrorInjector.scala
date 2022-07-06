@@ -1,7 +1,7 @@
 package io.simplematter.mqtttestsuite.util
 
 import io.simplematter.mqtttestsuite.config.ErrorInjectionConfig
-import zio.{Task, RIO}
+import zio.{RIO, Task, ZIO}
 
 import scala.util.Random
 
@@ -13,7 +13,7 @@ class ErrorInjector(errorInjectionConfig: ErrorInjectionConfig) {
     if(Random.nextInt(100) < errorInjectionConfig.publishDuplicatePercentage) {
       effect.flatMap(_ => effect)
     } else if (Random.nextInt(100) < errorInjectionConfig.publishMissedPercentage) {
-      Task.succeed(())
+      ZIO.succeed(())
     } else {
       effect
     }
@@ -23,7 +23,7 @@ class ErrorInjector(errorInjectionConfig: ErrorInjectionConfig) {
     if(Random.nextInt(100) < errorInjectionConfig.receiveDuplicatePercentage) {
       effect.flatMap(_ => effect)
     } else if (Random.nextInt(100) < errorInjectionConfig.receiveMissedPercentage) {
-      Task.succeed(())
+      ZIO.succeed(())
     } else {
       effect
     }

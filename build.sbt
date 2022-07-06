@@ -1,6 +1,6 @@
 //import AssemblyKeys._
 
-scalaVersion := "3.1.1"
+scalaVersion := "3.1.3"
 organization := "io.simplematter"
 name := "simplematter-mqtt-test-suite"
 
@@ -12,8 +12,8 @@ val hazelcastVersion = "4.2.2"
 libraryDependencies ++= Seq(
   //Misc
   "ch.qos.logback"        % "logback-classic"      %  "1.0.13",
-  "dev.zio"               %% "zio"                 % "1.0.14",
-  "dev.zio"               %% "zio-json"            % "0.2.0-M4",
+  "dev.zio"               %% "zio"                 % "2.0.0",
+  "dev.zio"               %% "zio-json"            % "0.3.0-RC9",
 
   //MQTT
   "io.netty"              % "netty-common"         % nettyVersion,
@@ -21,18 +21,18 @@ libraryDependencies ++= Seq(
   "io.netty"              % "netty-codec-mqtt"     % nettyVersion,
 
   //Kafka
-  "dev.zio"               %% "zio-kafka"           % "0.17.5",
+  "dev.zio"               %% "zio-kafka"           % "2.0.0",
 
   //HTTP
-  "io.d11"                %% "zhttp"               % "1.0.0.0-RC27",
+  "io.d11"                %% "zhttp"               % "2.0.0-RC9",
 
   //Data distribution
   "com.hazelcast"         % "hazelcast-all"        % hazelcastVersion,
 
   //Config
   "com.typesafe"          % "config"               % "1.4.1",
-  "dev.zio"               %% "zio-config-typesafe" % "2.0.4",
-  "dev.zio"               %% "zio-config-magnolia" % "2.0.4",
+  "dev.zio"               %% "zio-config-typesafe" % "3.0.1",
+  "dev.zio"               %% "zio-config-magnolia" % "3.0.1",
 
   //Test dependencies
   "org.testcontainers"    % "testcontainers"                  % "1.15.3"         % "test",
@@ -42,7 +42,8 @@ libraryDependencies ++= Seq(
   "org.scalatest"         %% "scalatest"                      % scalaTestVersion % "test",
   "org.scalatest"         %% "scalatest-core"                 % scalaTestVersion % "test",
   "org.scalatestplus"     %% "scalacheck-1-15"                % "3.2.9.0"        % "test",
-  "dev.zio"               %% "zio-test"                       % "1.0.12"         % "test",
+//  "dev.zio"               %% "zio-test"                       % "1.0.12"         % "test",
+  "dev.zio"               %% "zio-test"                       % "2.0.0"         % "test",
 )
 
 //this works as of 2021-10-28 - 'sbt run' picks the main class correctly and doesn't complain about multiple main classes

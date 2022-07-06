@@ -1,12 +1,13 @@
 package io.simplematter.mqtttestsuite.integration
 
+import com.hazelcast.core.HazelcastInstance
 import io.simplematter.mqtttestsuite.config.{HazelcastConfig, KafkaConfig, MqttBrokerConfig, MqttTestSuiteConfig, ScenarioConfig, StatsConfig}
 import io.simplematter.mqtttestsuite.hazelcast.HazelcastUtil
 import io.simplematter.mqtttestsuite.model.NodeIndex
 import io.simplematter.mqtttestsuite.mqtt.{MqttClient, MqttClientSpec}
 import io.simplematter.mqtttestsuite.scenario.{MqttTestScenario, ScenarioState}
 import io.simplematter.mqtttestsuite.stats.model.StatsSummary
-import io.simplematter.mqtttestsuite.stats.{StatsReporter, StatsStorage}
+import io.simplematter.mqtttestsuite.stats.{FlightRecorder, StatsReporter, StatsStorage}
 import io.simplematter.mqtttestsuite.testutil.ContainerUtils
 import org.scalatest.{BeforeAndAfterAll, OptionValues}
 import org.scalatest.concurrent.{Eventually, ScalaFutures}
@@ -15,11 +16,7 @@ import org.scalatest.matchers.should
 import org.scalatest.time.{Millis, Seconds, Span}
 import org.slf4j.LoggerFactory
 import org.testcontainers.containers.GenericContainer
-
-import zio.duration.*
-import zio.{ZIO, ZLayer, clock}
-import zio.clock.Clock
-import zio.blocking.Blocking
+import zio.{Clock, Console, Duration, ZIO, ZLayer}
 
 class MqttToMqttScenarioSpec extends AnyFlatSpec
   with should.Matchers
@@ -33,9 +30,7 @@ class MqttToMqttScenarioSpec extends AnyFlatSpec
   implicit val defaultPatience: PatienceConfig = PatienceConfig(timeout =  Span(5, Seconds), interval = Span(5, Millis))
 
   private val enableTestcontainers = true
-//    private val enableTestcontainers = false
   private lazy val mqttPort: Int = if(enableTestcontainers) mosquittoContainer.getMappedPort(1883) else 1883
-
 
   private lazy val mosquittoContainer: GenericContainer[_] = ContainerUtils.mosquittoContainer()
 
@@ -86,23 +81,29 @@ class MqttToMqttScenarioSpec extends AnyFlatSpec
   "MqttToMqttScenario" should "run successfully" in {
     val hz = HazelcastUtil.hazelcastInstanceLayer(testSuiteConfig.hazelcast)
 
-    val statsStorage = (hz ++ ZLayer.requires[Clock] ++ ZLayer.requires[Blocking]) >>>
+    val statsStorage: ZLayer[Clock, Any, StatsStorage & FlightRecorder & HazelcastInstance] = (hz ++ ZLayer.service[Clock]) >>>
       StatsStorage.layer(testSuiteConfig.nodeIdNonEmpty,
         testSuiteConfig.stats,
         testSuiteConfig.stats.statsUploadInterval,
         testSuiteConfig.mqtt,
         scenarioConfig).passthrough
 
-    val endStatsSummary: StatsSummary = zio.Runtime.default.unsafeRun {
-      (for {
-        statsStorage <- ZIO.service[StatsStorage]
-        runnerNodeIndex = NodeIndex(0, 1)
-        scn = MqttTestScenario.create(testSuiteConfig, scenarioConfig, runnerNodeIndex)
-        //race to make sure the scenario doesn't hang forever
-        _ <- scn.start().race(clock.sleep((2*scenarioConfig.durationSeconds).seconds))
-        _ <- StatsStorage.waitCompletion(testSuiteConfig.completionTimeout)
-        _ <- StatsStorage.finalizeStats()
-      } yield statsStorage.getStats()).provideSomeLayer(statsStorage)
+
+    val testEnv = (ZLayer.succeedEnvironment(zio.DefaultServices.live) >>> statsStorage).passthrough
+//    val testEnv = statsStorage.map(layers => (layers >>> zio.DefaultServices.live).passthrough)
+
+    val endStatsSummary: StatsSummary = zio.Unsafe.unsafe {
+      zio.Runtime.default.withEnvironment(zio.DefaultServices.live).unsafe.run {
+        (for {
+          statsStorage <- ZIO.service[StatsStorage]
+          runnerNodeIndex = NodeIndex(0, 1)
+          scn = MqttTestScenario.create(testSuiteConfig, scenarioConfig, runnerNodeIndex)
+          //race to make sure the scenario doesn't hang forever
+          _ <- scn.start().race(Clock.sleep(Duration.fromSeconds(2 * scenarioConfig.durationSeconds)))
+          _ <- StatsStorage.waitCompletion(testSuiteConfig.completionTimeout)
+          _ <- StatsStorage.finalizeStats()
+        } yield statsStorage.getStats()).provideSome[Clock & Console](statsStorage)
+    }.getOrThrowFiberFailure()
     }
 
     endStatsSummary.scenario.scenarioName shouldBe "mqttToMqtt"

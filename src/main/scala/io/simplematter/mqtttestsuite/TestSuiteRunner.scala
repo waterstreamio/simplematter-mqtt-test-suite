@@ -7,20 +7,20 @@ import io.simplematter.mqtttestsuite.mqtt.MqttClient
 import io.simplematter.mqtttestsuite.scenario.{MqttTestScenario, ScenarioEnv}
 import io.simplematter.mqtttestsuite.stats.{FlightRecorder, StatsProvider, StatsReporter, StatsStorage}
 import org.slf4j.LoggerFactory
-import zio.{ExitCode, Fiber, Has, RIO, Runtime, URIO, URLayer, ZEnv, ZIO, ZLayer, clock}
+import zio.{ExitCode, Fiber, RIO, Runtime, URIO, URLayer, ZIO, ZLayer}
+import zio.Clock
 
 import scala.concurrent.Await
 import scala.concurrent.duration.*
-import zio.clock.Clock
-import zio.blocking.Blocking
-import zio.console.Console
+import zio.Clock
+import zio.Console
 import zio.*
-import zio.duration.*
+import zio.Duration
 
-object TestSuiteRunner extends zio.App {
+object TestSuiteRunner extends ZIOAppDefault {
   private val log = LoggerFactory.getLogger(TestSuiteRunner.getClass)
 
-  private def testSuite(): RIO[Clock with Blocking with Console, Unit] = {
+  private def testSuite(): RIO[Clock with Console, Unit] = {
     val config = MqttTestSuiteConfig.load()
     val scenarioConfig = ScenarioConfig.load(config)
 
@@ -47,31 +47,59 @@ object TestSuiteRunner extends zio.App {
       ).flatMap { postScenario =>
         //success
         for {
-          _ <- ZIO { log.info(s"Scenario ${scn.name} complete, waiting ${config.completionTimeout} for the remaining messages") }
+          _ <- ZIO.attempt { log.info(s"Scenario ${scn.name} complete, waiting ${config.completionTimeout} for the remaining messages") }
           _ <- StatsStorage.waitCompletion(config.completionTimeout)
           _ <- postScenario.interrupt
         } yield ()
       }
       _ <- stF.interrupt
-      testStopTimestamp <- clock.instant
+      testStopTimestamp <- Clock.instant
       _ <- StatsStorage.finalizeStats()
       _ = statsReporter.printStats(testStopTimestamp.toEpochMilli(), Option(s"Final - ${testStopTimestamp}"))
       _ = MqttClient.shutdown()
     } yield ())
-      .provideSomeLayer[Clock with Blocking with Console](testSuiteLayer(config, scenarioConfig))
+      .provideSomeLayer[Clock with Console](testSuiteLayer(config, scenarioConfig))
   }
 
-  private def testSuiteLayer(config: MqttTestSuiteConfig, scenarioConfig: ScenarioConfig): ZLayer[Clock with Blocking, Throwable, Has[FlightRecorder] with Has[StatsStorage] with Has[StatsReporter] with Has[HazelcastInstance] ] = {
+  private def testSuiteLayer(config: MqttTestSuiteConfig, scenarioConfig: ScenarioConfig): ZLayer[Clock, Throwable, FlightRecorder with StatsStorage with StatsReporter with HazelcastInstance ] = {
     val hz = HazelcastUtil.hazelcastInstanceLayer(config.hazelcast)
 
-    val statsStorage = (hz ++ ZLayer.requires[Clock] ++ ZLayer.requires[Blocking]) >>>
+    val statsStorage = (hz ++ ZLayer.service[Clock]) >>>
         StatsStorage.layer(config.nodeIdNonEmpty, config.stats, config.stats.statsUploadInterval, config.mqtt, scenarioConfig).passthrough
 
-    val statsReporter = ZLayer.fromService[StatsStorage, StatsReporter](statsStorage => StatsReporter(config.stats, statsStorage))
-
-    (statsStorage >>> statsReporter.passthrough).passthrough
+//    val statsReporter = ZLayer.fromService[StatsStorage, StatsReporter](statsStorage => StatsReporter(config.stats, statsStorage))
+//    val statsReporter =
+    ZLayer.fromZIOEnvironment {
+      ZIO.scoped {
+        for {
+//          //        a = StatsStorage.layer(config.nodeIdNonEmpty, config.stats, config.stats.statsUploadInterval, config.mqtt, scenarioConfig)
+//          statsStorageEnv <- StatsStorage.layer(config.nodeIdNonEmpty, config.stats, config.stats.statsUploadInterval, config.mqtt, scenarioConfig).build
+            statsStorageEnv <- statsStorage.build
+          //        statsStorage <- ZIO.service[StatsStorage]
+//          flightRecorder <- ZIO.service[FlightRecorder]
+          //      } yield StatsReporter(config.stats, statsStorage)
+        } yield zio.ZEnvironment(StatsReporter(config.stats, statsStorageEnv.get[StatsStorage])) ++ statsStorageEnv
+      }
   }
 
-  def run(args: List[String]): URIO[ZEnv, ExitCode] = testSuite().exitCode
+//    (hz ++ ZLayer.service[Clock]) >>> statsReporter
+//    statsReporter
+
+
+//      statsStorage >+> statsReporter
+//    (statsStorage >>> statsReporter.passthrough).passthrough
+//    val res = (statsStorage >>> statsReporter.passthrough).passthrough
+//    val res = (statsStorage >>> statsReporter.passthrough)
+//    res
+//statsStorage
+//statsReporter
+//    ZLayer.make
+//    ZLayer.make[FlightRecorder & StatsStorage & StatsReporter & HazelcastInstance](
+//      statsStorage, statsReporter
+//    )
+  }
+
+//  def run: ZIO[Environment with ZIOAppArgs with Scope, Any, Any] = testSuite().exitCode
+  def run: ZIO[Environment with ZIOAppArgs with Scope, Any, Any] = testSuite().provideEnvironment(DefaultServices.live)
 
 }

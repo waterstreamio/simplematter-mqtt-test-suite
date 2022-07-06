@@ -53,11 +53,11 @@ class MessageGeneratorSpec extends AnyFlatSpec
     )
 
     forAll(messages) {(msg: String, expectedSuccess: Boolean, expectedIdStr: String, expectedTimestamp: Long) =>
-      val res = zio.Runtime.default.unsafeRunSync(MessageGenerator.unpackMessagePrefix(msg))
+      val res = zio.Unsafe.unsafe { zio.Runtime.default.unsafe.run(MessageGenerator.unpackMessagePrefix(msg)) }
       if(expectedSuccess) {
         res match {
           case Exit.Success((actualId, actualTimestamp)) =>
-            val expectedId = zio.Runtime.default.unsafeRun(MessageId.fromString(expectedIdStr))
+            val expectedId = zio.Unsafe.unsafe { zio.Runtime.default.unsafe.run(MessageId.fromString(expectedIdStr)) }
             actualId shouldBe expectedId
             actualTimestamp shouldBe expectedTimestamp
           case Exit.Failure(cause) =>

@@ -4,14 +4,12 @@ import io.netty.handler.codec.mqtt.MqttQoS
 import io.simplematter.mqtttestsuite.config.{KafkaConfig, MqttBrokerConfig, ScenarioConfig}
 import io.simplematter.mqtttestsuite.kafka.KafkaUtils
 import io.simplematter.mqtttestsuite.model.{ClientId, GroupedTopics, MessageId, MqttTopicName, NodeId, NodeIndex}
-import io.simplematter.mqtttestsuite.scenario.MqttToKafkaScenario.log
 import io.simplematter.mqtttestsuite.scenario.util.{MqttConsumer, MqttPublisher}
 import io.simplematter.mqtttestsuite.stats.FlightRecorder
 import io.simplematter.mqtttestsuite.util.{ErrorInjector, MessageGenerator, pickCircular, scheduleFrequency}
 import org.apache.kafka.clients.producer.ProducerConfig
 import org.slf4j.LoggerFactory
-import zio.duration.*
-import zio.{Fiber, Promise, RIO, Ref, Schedule, Task, URIO, ZIO, clock}
+import zio.{Clock, Duration, Fiber, Promise, RIO, Ref, Schedule, Task, URIO, ZIO}
 import zio.kafka.producer.*
 import zio.kafka.serde.Serde
 
@@ -43,7 +41,7 @@ class KafkaToMqttScenario(stepInterval: Duration,
       scenarioFinalizing <- Promise.make[Nothing, Unit]
       _ <- flightRecorder.scenarioRampUpStarted(name, scenarioConfig.rampUpSeconds, scenarioConfig.durationSeconds)
       _ <- flightRecorder.mqttConnectionsExpected(scenarioConfig.subscribingClientsPerNode)
-      (clientsWithConnections, mqttTopicToClients) <- rampUpMqttConsumers(
+      rampUpResult <- rampUpMqttConsumers(
                 rampUpSeconds = scenarioConfig.rampUpSeconds,
                 subscribingClientPrefix = consumingClientPrefix,
                 subscribingClientsPerNode = scenarioConfig.subscribingClientsPerNode,
@@ -54,14 +52,15 @@ class KafkaToMqttScenario(stepInterval: Duration,
                 connectionMonkey = scenarioConfig.connectionMonkey,
                 scenarioFinalizing = scenarioFinalizing
       )
+      (clientsWithConnections, mqttTopicToClients) = rampUpResult
       _ <- flightRecorder.scenarioRunning()
-      startTime <- clock.currentTime(TimeUnit.MILLISECONDS)
+      startTime <- Clock.currentTime(TimeUnit.MILLISECONDS)
       producingFiber <- startProducing(flightRecorder, mqttTopicToClients).fork
-      _ <- clock.sleep(scenarioConfig.durationSeconds.seconds)
+      _ <- Clock.sleep(Duration.fromSeconds(scenarioConfig.durationSeconds))
       _ <- scenarioStop.succeed(())
       _ <- producingFiber.interrupt
       _ <- flightRecorder.scenarioDone()
-      stopTime <- clock.currentTime(TimeUnit.MILLISECONDS)
+      stopTime <- Clock.currentTime(TimeUnit.MILLISECONDS)
       _ = log.info(s"Stopping scenario after ${(stopTime - startTime)/1000} s")
       _ <- scenarioFinalizing.succeed(())
       connectionsFiber = Fiber.collectAll(clientsWithConnections.map { case (_, mcFiber) => mcFiber})
@@ -73,13 +72,14 @@ class KafkaToMqttScenario(stepInterval: Duration,
     val producerSettings = ProducerSettings(kafkaConfig.bootstrapServersSeq.toList)
       .withProperties(kafkaConfig.producerProperties)
     val pseudoClientId = ClientId(nodeId.value + "-kafka")
-    Producer.make(producerSettings).use { producer =>
+    ZIO.scoped {
       for {
+        producer <- Producer.make(producerSettings)
         msgCounter <- Ref.make[Int](0)
         _ <- (for {
           n <-  msgCounter.updateAndGet(_ + 1)
           msgId = MessageId(pseudoClientId, n)
-          now <- clock.currentTime(TimeUnit.MILLISECONDS)
+          now <- Clock.currentTime(TimeUnit.MILLISECONDS)
           mqttTopic = thisNodeGroupedTopics.randomTopic()
           messageBody = MessageGenerator.generatePackedMessage(msgId, now, scenarioConfig.messageMinSize, scenarioConfig.messageMaxSize)
           expectedRecepients = mqttTopicSubscribers.getOrElse(mqttTopic, Seq.empty)

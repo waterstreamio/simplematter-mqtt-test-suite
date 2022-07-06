@@ -5,13 +5,13 @@ import io.simplematter.mqtttestsuite.model.ClientId
 import io.simplematter.mqtttestsuite.stats.StatsReporter.renderReportResponse
 import io.simplematter.mqtttestsuite.stats.presentation.{ReportOutputHtmlRenderer, ReportOutputModel, ReportOutputPlainTextRenderer}
 import org.slf4j.LoggerFactory
-import zio.{Has, RIO, Schedule, URIO, ZEnv, ZIO, clock}
-import zio.clock.Clock
-import zio.duration.*
+import zio.{RIO, Schedule, URIO, ZIO}
+import zio.Clock
+import zio.Duration
 import zhttp.http.*
 import zhttp.http.headers.*
 import zhttp.service.Server
-import zio.console.Console
+import zio.Console
 
 class StatsReporter(statsConfig: StatsConfig, statsProvider: StatsProvider) {
   import StatsReporter.log
@@ -21,7 +21,7 @@ class StatsReporter(statsConfig: StatsConfig, statsProvider: StatsProvider) {
       psF <- printStatsRegularly(statsConfig.statsInterval).fork
       _ <- statsConfig.statsPortIntOption.fold[RIO[Clock, Unit]]{
         log.debug("Stats HTTP port not specified, not exposing the stats")
-        RIO.succeed(())
+        ZIO.succeed(())
       }{port =>
         log.debug(s"Exposing stats on HTTP port $port")
         runHttpService(port)}
@@ -41,9 +41,9 @@ class StatsReporter(statsConfig: StatsConfig, statsProvider: StatsProvider) {
     }
   }
 
-  private def printStatsRegularly(interval: Duration = 10.seconds): RIO[Clock, Unit] = {
+  private def printStatsRegularly(interval: Duration = Duration.fromSeconds(10)): RIO[Clock, Unit] = {
     (for {
-      now <- clock.instant
+      now <- Clock.instant
       _ = printStats(now.toEpochMilli(), Option(s"current - ${now.toString}"))
     } yield ()).repeat(Schedule.spaced(interval)).as(())
   }
@@ -52,13 +52,13 @@ class StatsReporter(statsConfig: StatsConfig, statsProvider: StatsProvider) {
     Server.start[Clock](port, Http.collectZIO[Request] {
       case req@Method.GET -> !! => {
         for {
-          timestamp <- clock.instant
+          timestamp <- Clock.instant
           stats = statsProvider.getStats()
           outModel = stats.buildOutput(timestamp.toEpochMilli(), Option(timestamp.toString()), statsProvider.getMqttBrokerConfig(), statsProvider.getScenarioConfig())
         } yield renderReportResponse(req.headers.accept, outModel)
       }
       case req@Method.GET -> !! / "conclusion" => {
-        ZIO {
+        ZIO.attempt {
           val stats = statsProvider.getStats()
           val scenarioConfig = statsProvider.getScenarioConfig()
           Response.text(stats.conclusion(scenarioConfig).toString)
@@ -66,14 +66,14 @@ class StatsReporter(statsConfig: StatsConfig, statsProvider: StatsProvider) {
       }
       case req@Method.GET -> !! / "issues" / clientIdStr => {
         for {
-          timestamp <- clock.instant
+          timestamp <- Clock.instant
           issues = statsProvider.getIssuesReport()
           outModel = issues.buildOutputByClient(ClientId(clientIdStr), timestamp.toEpochMilli(), Option(timestamp.toString()))
         } yield renderReportResponse(req.headers.accept, outModel)
       }
       case req@Method.GET -> !! / "issues" => {
         for {
-          timestamp <- clock.instant
+          timestamp <- Clock.instant
           issues = statsProvider.getIssuesReport()
           outModel = issues.buildOutput(timestamp.toEpochMilli(), Option(timestamp.toString()))
         } yield renderReportResponse(req.headers.accept, outModel)

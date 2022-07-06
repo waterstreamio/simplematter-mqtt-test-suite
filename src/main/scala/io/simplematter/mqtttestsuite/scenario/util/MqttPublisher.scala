@@ -8,10 +8,9 @@ import io.simplematter.mqtttestsuite.mqtt.{MqttClient, MqttOptions}
 import io.simplematter.mqtttestsuite.util.{ErrorInjector, MessageGenerator}
 import io.simplematter.mqtttestsuite.stats.FlightRecorder
 import org.slf4j.LoggerFactory
-import zio.clock.Clock
-import zio.duration.*
-import zio.blocking.Blocking
-import zio.{Fiber, Has, IO, Promise, RIO, Ref, Schedule, Semaphore, Task, UIO, URIO, ZIO, clock}
+import zio.Clock
+import zio.Duration
+import zio.{Fiber, IO, Promise, RIO, Ref, Schedule, Semaphore, Task, UIO, URIO, ZIO}
 
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.TimeUnit
@@ -36,7 +35,7 @@ class MqttPublisher private(mqttBrokerConfig: MqttBrokerConfig,
 
   import MqttPublisher.log
 
-  private val messageSendingMinInterval = (1000/messagesPerSecond).toInt.milliseconds
+  private val messageSendingMinInterval = Duration.fromMillis((1000/messagesPerSecond).toInt)
 
 
   /**
@@ -44,30 +43,28 @@ class MqttPublisher private(mqttBrokerConfig: MqttBrokerConfig,
    *
    * @return
    */
-  def sendMessages(): RIO[Clock with Blocking, Unit] = {
+  def sendMessages(): RIO[Clock, Unit] = {
     for {
       msgCounter <- Ref.make[Int](0)
       _ <- (for {
         n <-  msgCounter.updateAndGet(_ + 1)
         msgId = MessageId(clientId, n)
-        now <- clock.currentTime(TimeUnit.MILLISECONDS)
+        now <- Clock.currentTime(TimeUnit.MILLISECONDS)
         _ = log.trace("Publishing {} message {}, timestamp {}", clientId, msgId, now)
-        _ <- sendMessageIfPossible(msgId, now).catchAll { err => UIO.succeed(log.error(s"Client ${clientId} failed to send MQTT message", err)) }
-      } yield ()).repeat(Schedule.fixed(messageSendingMinInterval)).onInterrupt {
-        (for {
-          _ <- ZIO { log.debug("Interrupt sending the messages for {}", clientId) }
-        } yield ()).run
+        _ <- sendMessageIfPossible(msgId, now).catchAll { err => ZIO.succeed(log.error(s"Client ${clientId} failed to send MQTT message", err)) }
+      } yield ()).repeat(Schedule.fixed(messageSendingMinInterval)).onInterrupt { _ =>
+          ZIO.attempt { log.debug("Interrupt sending the messages for {}", clientId) }.exit
       }
     } yield()
   }
 
   def publishInFlightCount(): Int = client.publishInFlightCount()
 
-  private def sendMessageIfPossible(messageId: MessageId, timestamp: Long): RIO[Clock with Blocking, Unit] = {
+  private def sendMessageIfPossible(messageId: MessageId, timestamp: Long): RIO[Clock, Unit] = {
     if(client.isConnected()) {
       for {
-        _ <- Task { log.trace("Connected - sending msg {}", messageId) }
-        topic <- Task { topics.randomTopic() }
+        _ <- ZIO.attempt { log.trace("Connected - sending msg {}", messageId) }
+        topic <- ZIO.attempt { topics.randomTopic() }
         _ <- flightRecorder.recordMessageSend(messageId, errorInjector.sendMessage(ZIO.fromFuture { implicit ec =>
           client.publish(topic = topic.value,
             payload = Unpooled.copiedBuffer(MessageGenerator.generatePackedMessage(messageId, timestamp, messageMinSize, messageMaxSize), StandardCharsets.UTF_8),
@@ -77,7 +74,7 @@ class MqttPublisher private(mqttBrokerConfig: MqttBrokerConfig,
         }), topic, expectedRecepients(topic)).uninterruptible /* not interrupt to make sure that the statistics gets written correctly when the test shuts down */
       } yield ()
     } else {
-      Task { log.debug("{} not connected - skip sending the message {}", clientId, messageId) }
+      ZIO.attempt { log.debug("{} not connected - skip sending the message {}", clientId, messageId) }
     }
   }
 }
@@ -97,7 +94,7 @@ object MqttPublisher {
            topics: GroupedTopics,
            expectedRecepients: (MqttTopicName => Option[Iterable[ClientId]]),
            errorInjector: ErrorInjector
-          ): URIO[Has[FlightRecorder], MqttPublisher] = {
+          ): URIO[FlightRecorder, MqttPublisher] = {
     for {
       flightRecorder <- ZIO.service[FlightRecorder]
       clientConnectMutex <- Semaphore.make(1)

@@ -1,11 +1,11 @@
 package io.simplematter.mqtttestsuite
 
 import org.slf4j.Logger
-import zio.Schedule.StepFunction
+import zio.Schedule.{Decision, Interval}
 
 import scala.concurrent.{ExecutionContext, Future}
 import zio.{RIO, Schedule, URIO, ZIO}
-import zio.duration.*
+import zio.Duration
 
 import java.time.OffsetDateTime
 
@@ -23,7 +23,7 @@ package object util {
     def logExceptions(message: String, log: Logger, default: A): URIO[R, A] = {
       r.catchAll { e =>
         log.error(message, e)
-        URIO.succeed(default)
+        ZIO.succeed(default)
       }
     }
   }
@@ -94,39 +94,75 @@ package object util {
     }
   }
 
-  def scheduleFrequency(timesPerSecond: Double): Schedule[Any, Any, Long] = {
-    import zio.Schedule.Decision._
-    import java.time.Duration
+  def scheduleFrequency(timesPerSecond: Double): Schedule[Any, Any, Long] = new Schedule[Any, Any, Long] {
+    //TODO this needs unit test
+    import zio.Schedule.Decision
+    final case class State(start: Option[OffsetDateTime], n: Long)
 
-    final case class State(start: OffsetDateTime)
+    val initial = State(None, 0L)
 
-    def loop(state: Option[State], n: Long): StepFunction[Any, Any, Long] =
-      (now: OffsetDateTime, _: Any) =>
-        ZIO.succeed(state match {
-          case Some(State(start)) =>
-            val nowMillis     = now.toInstant.toEpochMilli()
-            val startMillis   = start.toInstant.toEpochMilli()
-            val expectedDurationMillis = (n*1000 / timesPerSecond).toLong
-            val runningBehind = expectedDurationMillis < nowMillis - startMillis
-            val sleepTime = (nowMillis - startMillis)
-            val nextRun   = if (runningBehind) now else start.plus(Duration.ofMillis(expectedDurationMillis))
+    def step(now: OffsetDateTime, in: Any, state: State)(implicit trace: zio.Trace): ZIO[Any, Nothing, (State, Long, Decision)] =
+            ZIO.succeed(state match {
+              case State(st @ Some(start), n)  =>
+                val nowMillis     = now.toInstant.toEpochMilli()
+                val startMillis   = start.toInstant.toEpochMilli()
+                val expectedDurationMillis = (n*1000 / timesPerSecond).toLong
+                val runningBehind = expectedDurationMillis < nowMillis - startMillis
+                val sleepTime = (nowMillis - startMillis)
+                val nextRun   = if (runningBehind) now else start.plus(expectedDurationMillis, java.time.temporal.ChronoUnit.MILLIS)
 
-            Continue(
-              n + 1L,
-              nextRun,
-                loop(Some(State(start)), n + 1L)
-            )
-          case None =>
-            val nextRun   = now.plus(Duration.ofMillis((1000/timesPerSecond).toLong))
+                (State(st, n + 1L), n, Decision.Continue(Interval.after(nextRun)))
 
-            Continue(
-              n + 1L,
-              nextRun,
-                loop(Some(State(now)), n + 1L)
-            )
-        })
+//                Decision.Continue(
+//                  n + 1L,
+//                  nextRun,
+//                    loop(Some(State(start)), n + 1L)
+//                )
+              case _ =>
+//                val nextRun   = now.plus((1000/timesPerSecond).toLong, java.time.temporal.ChronoUnit.MILLIS)
+                (State(Some(now), 1L), 1L, Decision.Continue(Interval.empty))
+//
+//                Decision.Continue(
+//                  n + 1L,
+//                  nextRun,
+//                    loop(Some(State(now)), n + 1L)
+//                )
+            })
 
-    Schedule(loop(None, 0L))
   }
+//  def scheduleFrequency(timesPerSecond: Double): Schedule[Any, Any, Long] = {
+//    import zio.Schedule.Decision._
+//    import java.time.Duration
+//
+//    final case class State(start: OffsetDateTime)
+//
+//    def loop(state: Option[State], n: Long): StepFunction[Any, Any, Long] =
+//      (now: OffsetDateTime, _: Any) =>
+//        ZIO.succeed(state match {
+//          case Some(State(start)) =>
+//            val nowMillis     = now.toInstant.toEpochMilli()
+//            val startMillis   = start.toInstant.toEpochMilli()
+//            val expectedDurationMillis = (n*1000 / timesPerSecond).toLong
+//            val runningBehind = expectedDurationMillis < nowMillis - startMillis
+//            val sleepTime = (nowMillis - startMillis)
+//            val nextRun   = if (runningBehind) now else start.plus(Duration.ofMillis(expectedDurationMillis))
+//
+//            Continue(
+//              n + 1L,
+//              nextRun,
+//                loop(Some(State(start)), n + 1L)
+//            )
+//          case None =>
+//            val nextRun   = now.plus(Duration.ofMillis((1000/timesPerSecond).toLong))
+//
+//            Continue(
+//              n + 1L,
+//              nextRun,
+//                loop(Some(State(now)), n + 1L)
+//            )
+//        })
+//
+//    Schedule(loop(None, 0L))
+//  }
 
 }

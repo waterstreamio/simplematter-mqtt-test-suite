@@ -11,9 +11,9 @@ import io.simplematter.mqtttestsuite.scenario.util.{MqttConsumer, MqttPublisher}
 import io.simplematter.mqtttestsuite.stats.FlightRecorder
 import io.simplematter.mqtttestsuite.util.{ErrorInjector, MessageGenerator}
 import org.slf4j.LoggerFactory
-import zio.{Fiber, Promise, RIO, Ref, Task, URIO, ZIO, clock}
-import zio.clock.Clock
-import zio.duration.*
+import zio.{Fiber, Promise, RIO, Ref, Task, URIO, ZIO}
+import zio.Clock
+import zio.Duration
 
 import java.util.concurrent.TimeUnit
 
@@ -47,10 +47,10 @@ trait MqttTestScenario {
                                   connectionMonkey: ConnectionMonkeyConfig,
                                   expectedRecepients: (MqttTopicName => Option[Iterable[ClientId]])): RIO[ScenarioEnv, Seq[MqttPublisher.WithConnection]] = {
     for {
-      startTimestamp <- clock.currentTime(TimeUnit.MILLISECONDS)
+      startTimestamp <- Clock.currentTime(TimeUnit.MILLISECONDS)
       flightRecorder <- ZIO.service[FlightRecorder]
       rampUpComplete <- Promise.make[Nothing, Unit]
-      publishingStart = if (actionsDuringRampUp) Task.succeed(()) else rampUpComplete.await
+      publishingStart = if (actionsDuringRampUp) ZIO.succeed(()) else rampUpComplete.await
       allPublishersMs = createMqttPublishers(
         publishingClientsPerNode = publishingClientsPerNode,
         publishingClientPrefix = publishingClientPrefix,
@@ -73,20 +73,20 @@ trait MqttTestScenario {
       //             } yield ()
       allPublishersWithConnections <- ZIO.collectAll(allPublishers.zipWithIndex.map { case (publisher, publisherIndex) =>
         for {
-          mcFiber <- publisher.maintainConnection(scenarioFinalizing, mqttBrokerConfig.statusCheckIntervalSeconds.seconds).fork
+          mcFiber <- publisher.maintainConnection(scenarioFinalizing, Duration.fromSeconds(mqttBrokerConfig.statusCheckIntervalSeconds)).fork
           sendMsgFiber <- publishingStart.zipRight {
             log.debug(s"Starting the publishing for ${publisher.clientId}")
             publisher.sendMessages()
           }.fork
           //explicit mcFiber.interrupt needed here in order to stop publishing while other threads keep working (e.g. for receiving the remaining messages)
-          _ <- (scenarioFinalizing.await *> ZIO {
+          _ <- (scenarioFinalizing.await *> ZIO.attempt {
             log.debug(s"Scenario is finalizing, stopping publishing for ${publisher.clientId}")
           } *> (sendMsgFiber.interrupt)).fork
           _ <- MqttTestScenario.delayAfterClientSpawn(rampUpSeconds, startTimestamp, publisherIndex, publishingClientsPerNode)
         } yield (publisher, mcFiber)
       })
 
-      rampUpCompleteTimestamp <- clock.currentTime(TimeUnit.MILLISECONDS)
+      rampUpCompleteTimestamp <- Clock.currentTime(TimeUnit.MILLISECONDS)
       _ = log.debug(s"After spawn: ${allPublishers.size} publishers, publishers ramp up actual duration = ${rampUpCompleteTimestamp - startTimestamp}")
       _ <- rampUpComplete.succeed(())
     } yield allPublishersWithConnections
@@ -134,7 +134,7 @@ trait MqttTestScenario {
                                     scenarioFinalizing: Promise[Nothing, Unit]
                                    ): RIO[ScenarioEnv, (Seq[MqttConsumer.WithConnection], Map[MqttTopicName, Seq[ClientId]])] = {
     for {
-      startTimestamp <- clock.currentTime(TimeUnit.MILLISECONDS)
+      startTimestamp <- Clock.currentTime(TimeUnit.MILLISECONDS)
       (allConsumersMs, clientsByTopics) = createMqttConsumers(
         consumingClientPrefix = subscribingClientPrefix,
         subscribingClientsPerNode = subscribingClientsPerNode,
@@ -147,18 +147,18 @@ trait MqttTestScenario {
 
       //      rampUpComplete <- Promise.make[Nothing, Unit]
       allConsumers <- ZIO.collectAllPar(allConsumersMs)
-      consumersWithConnectionFibers <- allConsumers.zipWithIndex.foldLeft[RIO[ScenarioEnv, Seq[MqttConsumer.WithConnection]]](RIO[Seq[MqttConsumer.WithConnection]] {
+      consumersWithConnectionFibers <- allConsumers.zipWithIndex.foldLeft[RIO[ScenarioEnv, Seq[MqttConsumer.WithConnection]]](ZIO.succeed[Seq[MqttConsumer.WithConnection]] {
         Seq.empty
       }) { case (accEffect, (consumer, consumerIndex)) =>
         for {acc <- accEffect
-             mcFiber <- consumer.maintainConnection(scenarioFinalizing, mqttBrokerConfig.statusCheckIntervalSeconds.seconds).fork
+             mcFiber <- consumer.maintainConnection(scenarioFinalizing, Duration.fromSeconds(mqttBrokerConfig.statusCheckIntervalSeconds)).fork
              _ <- MqttTestScenario.delayAfterClientSpawn(rampUpSeconds, startTimestamp, consumerIndex, subscribingClientsPerNode)
              } yield acc :+ (consumer, mcFiber)
       }
       _ = log.debug("Creating consumers complete, waiting for subscriptions")
-      _ <- ZIO.collectAllPar(allConsumers.map(_.waitForSubscribe(mqttBrokerConfig.subscribeTimeoutSeconds.seconds).retryN(mqttBrokerConfig.subscribeMaxRetries)))
+      _ <- ZIO.collectAllPar(allConsumers.map(_.waitForSubscribe(Duration.fromSeconds(mqttBrokerConfig.subscribeTimeoutSeconds)).retryN(mqttBrokerConfig.subscribeMaxRetries)))
       _ = log.debug("Consumer subscriptions established")
-      stopTimestamp <- clock.currentTime(TimeUnit.MILLISECONDS)
+      stopTimestamp <- Clock.currentTime(TimeUnit.MILLISECONDS)
       _ = log.debug(s"After ramp up: ${allConsumers.size} consumers, consumers ramp up actual duration = ${stopTimestamp - startTimestamp}")
       //      _ <- rampUpComplete.succeed(())
     } yield (consumersWithConnectionFibers, clientsByTopics)
@@ -239,12 +239,12 @@ object MqttTestScenario {
 
   def delayAfterClientSpawn(rampUpSeconds: Int, startTimestamp: Long, clientsNumber: Int, targetClientsNumber: Int): RIO[Clock, Unit] = {
     for {
-      now <- clock.currentTime(TimeUnit.MILLISECONDS)
+      now <- Clock.currentTime(TimeUnit.MILLISECONDS)
       n = clientsNumber
       tNext = rampUpSeconds * 1000L * n / targetClientsNumber + startTimestamp
-      delay = (if (n >= targetClientsNumber || tNext < now) 0 else tNext - now).milliseconds
+      delay = Duration.fromMillis(if (n >= targetClientsNumber || tNext < now) 0 else tNext - now)
       _ = log.debug("Sleeping for {}, current clients {}", delay, n)
-      _ <- clock.sleep(delay)
+      _ <- Clock.sleep(delay)
     } yield ()
   }
 

@@ -6,10 +6,9 @@ import io.simplematter.mqtttestsuite.util.QuantileApprox
 import io.simplematter.mqtttestsuite.config.{HazelcastConfig, MqttBrokerConfig, ScenarioConfig}
 import io.simplematter.mqtttestsuite.scenario.ScenarioState
 import org.slf4j.LoggerFactory
-import zio.{RIO, Schedule, UIO, URIO, ZIO, clock}
-import zio.clock.Clock
-import zio.duration.*
-import zio.Has
+import zio.{RIO, Schedule, UIO, URIO, ZIO}
+import zio.Clock
+import zio.Duration
 import zio.{TaskLayer, ULayer, URLayer, ZLayer}
 import zio.json.*
 
@@ -155,10 +154,10 @@ object StatsAggregator {
     def latencyAvg: Long = if(received.count == 0) 0L else latencySum / received.count
   }
 
-  val layer: URLayer[Has[HazelcastInstance], Has[StatsProvider]] =
-    ZLayer.requires[Has[HazelcastInstance]].map { hasHc =>
-      val agg = StatsAggregator(hasHc.get[HazelcastInstance])
-      agg.listenForUpdates()
-      Has(agg)
-    }
+  val layer: URLayer[HazelcastInstance, StatsProvider] =
+    ZLayer { for {
+      hc <- ZIO.service[HazelcastInstance]
+      agg = StatsAggregator(hc)
+      _ = agg.listenForUpdates()
+    } yield agg }
 }

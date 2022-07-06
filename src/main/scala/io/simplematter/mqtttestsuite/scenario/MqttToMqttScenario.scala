@@ -10,9 +10,9 @@ import io.simplematter.mqtttestsuite.scenario.MqttTestScenario.PostScenarioActiv
 import io.simplematter.mqtttestsuite.scenario.MqttToKafkaScenario.log
 import io.simplematter.mqtttestsuite.util.{ErrorInjector, MessageGenerator}
 import org.slf4j.LoggerFactory
-import zio.clock.Clock
-import zio.duration.*
-import zio.{Fiber, Has, IO, Promise, RIO, Ref, Runtime, Task, UIO, ZIO, clock}
+import zio.Clock
+import zio.Duration
+import zio.{Fiber, IO, Promise, RIO, Ref, Runtime, Task, UIO, ZIO}
 
 import java.util.concurrent.TimeUnit
 import scala.concurrent.Future
@@ -48,7 +48,7 @@ class MqttToMqttScenario(stepInterval: Duration,
       finalizingScenario <- Promise.make[Nothing, Unit]
       _ <- flightRecorder.scenarioRampUpStarted(name, scenarioConfig.rampUpSeconds, scenarioConfig.durationSeconds)
       _ <- flightRecorder.mqttConnectionsExpected(mqttClientsPerNode)
-      (mqttConsumersWithConnections, mqttTopicToClients) <- rampUpMqttConsumers(
+      rampUpResult <- rampUpMqttConsumers(
         rampUpSeconds = consumersRampUpSeconds,
         subscribingClientPrefix = subscribingClientPrefix,
         subscribingClientsPerNode = scenarioConfig.subscribingClientsPerNode,
@@ -59,6 +59,7 @@ class MqttToMqttScenario(stepInterval: Duration,
         connectionMonkey = scenarioConfig.subscribeConnectionMonkey,
         scenarioFinalizing = finalizingScenario
       )
+      (mqttConsumersWithConnections, mqttTopicToClients) = rampUpResult
       publishersWithConnections <- rampUpPublishers(//scenarioStop.await,
         scenarioFinalizing = finalizingScenario,
         rampUpSeconds = publishersRampUpSeconds,
@@ -71,12 +72,12 @@ class MqttToMqttScenario(stepInterval: Duration,
         expectedRecepients = (topic => mqttTopicToClients.get(topic))
       )
       _ <- flightRecorder.scenarioRunning()
-      startTime <- clock.currentTime(TimeUnit.MILLISECONDS)
-      _ <- clock.sleep(scenarioConfig.durationSeconds.seconds)
+      startTime <- Clock.currentTime(TimeUnit.MILLISECONDS)
+      _ <- Clock.sleep(Duration.fromSeconds(scenarioConfig.durationSeconds))
 //      _ <- scenarioStop.succeed(())
       _ <- finalizingScenario.succeed(())
       _ <- flightRecorder.scenarioDone()
-      stopTime <- clock.currentTime(TimeUnit.MILLISECONDS)
+      stopTime <- Clock.currentTime(TimeUnit.MILLISECONDS)
       _ = log.info(s"Stopped scenario after ${(stopTime - startTime)/1000} s")
       publishersConnectionsFiber = Fiber.collectAll(publishersWithConnections.map { case (_, mcFiber) => mcFiber})
       consumersConnectionsFiber = Fiber.collectAll(mqttConsumersWithConnections.map { case (_, mcFiber) => mcFiber})

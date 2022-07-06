@@ -5,27 +5,38 @@ import com.hazelcast.kubernetes.KubernetesProperties
 import io.simplematter.mqtttestsuite.config.HazelcastConfig
 import io.simplematter.mqtttestsuite.model.{NodeId, NodeIndex}
 import org.slf4j.LoggerFactory
-import zio.{Has, RIO, Task, TaskLayer, ZIO, ZLayer}
-import zio.clock.Clock
+import zio.{RIO, Task, TaskLayer, ZIO, ZLayer}
+import zio.Clock
 import java.util.concurrent.TimeoutException
-import zio.duration.*
+import zio.Duration
 import zio.Schedule
 import scala.jdk.CollectionConverters.*
 
 object HazelcastUtil {
   private val log = LoggerFactory.getLogger(HazelcastUtil.getClass)
 
-  def hazelcastInstanceLayer(hazelcastConfig: HazelcastConfig): TaskLayer[Has[HazelcastInstance]] = {
-    ZLayer.fromAcquireRelease[Any, Throwable, HazelcastInstance](ZIO {
-      createHazelcastInstance(hazelcastConfig)
-    })({ (hzInstance: HazelcastInstance) =>
-      ZIO({
-        log.debug("Shutting down Hazelcast instance")
-        hzInstance.shutdown()
-      }).catchAll(e => ZIO.succeed {
-        log.error("Failed to shut down Hazelcast instance", e)
+  def hazelcastInstanceLayer(hazelcastConfig: HazelcastConfig): TaskLayer[HazelcastInstance] = {
+    ZLayer.scoped {
+      ZIO.acquireRelease(ZIO.attempt { createHazelcastInstance(hazelcastConfig) })({
+        (hzInstance: HazelcastInstance) =>
+          ZIO.attempt ({
+            log.debug("Shutting down Hazelcast instance")
+            hzInstance.shutdown()
+          }).catchAll(e => ZIO.succeed {
+            log.error("Failed to shut down Hazelcast instance", e)
+          })
       })
-    })
+    }
+//    ZLayer.fromAcquireRelease[Any, Throwable, HazelcastInstance](ZIO.attempt {
+//      createHazelcastInstance(hazelcastConfig)
+//    })({ (hzInstance: HazelcastInstance) =>
+//      ZIO({
+//        log.debug("Shutting down Hazelcast instance")
+//        hzInstance.shutdown()
+//      }).catchAll(e => ZIO.succeed {
+//        log.error("Failed to shut down Hazelcast instance", e)
+//      })
+//    })
   }
 
   private def createHazelcastInstance(hazelcastConfig: HazelcastConfig): HazelcastInstance = {
@@ -66,7 +77,7 @@ object HazelcastUtil {
     hzInst
   }
 
-  def waitForMinSize(minSize: Option[Int], maxWaitSeconds: Int): RIO[Clock with Has[HazelcastInstance], Unit] = {
+  def waitForMinSize(minSize: Option[Int], maxWaitSeconds: Int): RIO[Clock with HazelcastInstance, Unit] = {
     ZIO.service[HazelcastInstance].map { hzInst =>
       minSize.fold {
         log.debug("No minimal size requirement for Hazelcast cluster - proceeding")
@@ -81,8 +92,8 @@ object HazelcastUtil {
           false
         }
       }
-    }.repeat(Schedule.recurUntilEquals(true) && Schedule.spaced(10.seconds))
-      .timeoutFail(throw new TimeoutException(s"Timed out waiting for Hazelcast cluser minimal size"))(maxWaitSeconds.seconds)
+    }.repeat(Schedule.recurUntilEquals(true) && Schedule.spaced(Duration.fromSeconds(10)))
+      .timeoutFail(throw new TimeoutException(s"Timed out waiting for Hazelcast cluser minimal size"))(Duration.fromSeconds(maxWaitSeconds))
       .as(())
   }
 
@@ -93,19 +104,19 @@ object HazelcastUtil {
    * @param maxWaitSeconds
    * @return 
    */
-  def getNodeIndex(expectedNodesCount: Int, nodeId: NodeId, maxWaitSeconds: Int): RIO[Clock with Has[HazelcastInstance], NodeIndex] = {
+  def getNodeIndex(expectedNodesCount: Int, nodeId: NodeId, maxWaitSeconds: Int): RIO[Clock with HazelcastInstance, NodeIndex] = {
     for {
       hz <- ZIO.service[HazelcastInstance]
       idsSet = hz.getSet[NodeId](nodeIdSetName)
       _ = idsSet.add(nodeId)
-      _ <- ZIO { idsSet.size() }
-        .repeat(Schedule.recurUntil[Int](_ >= expectedNodesCount) && Schedule.spaced(2.seconds))
-        .timeoutFail(throw new TimeoutException(s"Timed out waiting for the expected nodes count"))(maxWaitSeconds.seconds)
+      _ <- ZIO.attempt { idsSet.size() }
+        .repeat(Schedule.recurUntil[Int](_ >= expectedNodesCount) && Schedule.spaced(Duration.fromSeconds(2)))
+        .timeoutFail(throw new TimeoutException(s"Timed out waiting for the expected nodes count"))(Duration.fromSeconds(maxWaitSeconds))
         .as(())
       allIds = idsSet.asScala.toSeq.sortBy(_.value)
       idx = allIds.indexOf(nodeId)
       _ = log.debug("This node {} index is {} out of {} (expected {}): {}", nodeId, idx, allIds.size, expectedNodesCount, allIds)
-      _ <- if(idx >=0) ZIO.succeed(()) else ZIO.fail(new IllegalStateException(s"This node ID ${nodeId} not found in all node IDs seq ${allIds}"))
+      _ <- if(idx >= 0) ZIO.succeed(()) else ZIO.fail(new IllegalStateException(s"This node ID ${nodeId} not found in all node IDs seq ${allIds}"))
     } yield NodeIndex(idx, expectedNodesCount)
   }
 

@@ -8,8 +8,8 @@ import io.simplematter.mqtttestsuite.scenario.util.MqttPublisher.log
 import io.simplematter.mqtttestsuite.stats.FlightRecorder
 import org.slf4j.LoggerFactory
 import zio.{Promise, RIO, Schedule, Semaphore, UIO, URIO, ZIO}
-import zio.clock.Clock
-import zio.duration.*
+import zio.Clock
+import zio.Duration
 
 import scala.jdk.CollectionConverters.*
 import java.util.concurrent.ConcurrentSkipListSet
@@ -26,6 +26,9 @@ class MqttConnectionCommons protected (mqttBrokerConfig: MqttBrokerConfig,
                                        ) {
   import MqttConnectionCommons.log
 
+  //TODO can we wrap the code into the main runtime and avoid unsafe env here?
+  private val unsafeRuntime = zio.Runtime.default.withEnvironment(zio.DefaultServices.live).unsafe
+
   protected val client = new MqttClient(mqttBrokerConfig.serverHost,
     mqttBrokerConfig.serverPort,
     MqttOptions(
@@ -38,16 +41,19 @@ class MqttConnectionCommons protected (mqttBrokerConfig: MqttBrokerConfig,
 
   {
     client.onClose { wasAccepted =>
-      //TODO can we wrap it into the main runtime and avoid unsafeRun here?
-      zio.Runtime.default.unsafeRun(flightRecorder.mqttConnectionClosed(clientId, wasAccepted))
+      zio.Unsafe.unsafe {
+        unsafeRuntime.run(flightRecorder.mqttConnectionClosed(clientId, wasAccepted))
+      }
     }
     client.onPublishRetransmit { publishMsg =>
-      //TODO can we wrap it into the main runtime and avoid unsafeRun here?
-      zio.Runtime.default.unsafeRun(flightRecorder.mqttPublishMessageRetransmitAttempt())
+      zio.Unsafe.unsafe {
+        unsafeRuntime.run(flightRecorder.mqttPublishMessageRetransmitAttempt())
+      }
     }
     client.onPubrelRetransmit { msgId =>
-      //TODO can we wrap it into the main runtime and avoid unsafeRun here?
-      zio.Runtime.default.unsafeRun(flightRecorder.mqttPubrelMessageRetransmitAttempt())
+      zio.Unsafe.unsafe {
+        unsafeRuntime.run(flightRecorder.mqttPubrelMessageRetransmitAttempt())
+      }
     }
   }
 
@@ -60,11 +66,11 @@ class MqttConnectionCommons protected (mqttBrokerConfig: MqttBrokerConfig,
    */
   val connectIfNotConnected: RIO[Clock, Unit] = {
     clientConnectMutex.withPermit(
-      ZIO { client.isConnected() }.flatMap(isConnected =>
+      ZIO.attempt { client.isConnected() }.flatMap(isConnected =>
         if(isConnected) {
           ZIO.succeed(())
         } else {
-            ZIO { log.info("Client {} not connected, connecting it", clientId) }.flatMap { _ =>
+            ZIO.attempt { log.info("Client {} not connected, connecting it", clientId) }.flatMap { _ =>
             flightRecorder.recordMqttConnect(clientId,
               //Not interrupt so that we have an accurate stats for the clients that were trying to connect when the test was terminating
               ZIO.fromFuture { implicit ec => client.connect(cleanSession) })
@@ -88,11 +94,11 @@ class MqttConnectionCommons protected (mqttBrokerConfig: MqttBrokerConfig,
    * @param timeout
    * @return
    */
-  def disconnect(timeout: Duration = 30.seconds): RIO[Clock, Unit] = {
-    clientConnectMutex.withPermit( ZIO { client.isConnected() }.flatMap(isConnected =>
+  def disconnect(timeout: Duration = Duration.fromSeconds(30)): RIO[Clock, Unit] = {
+    clientConnectMutex.withPermit( ZIO.attempt { client.isConnected() }.flatMap(isConnected =>
       if(isConnected) {
         ZIO.fromFuture { implicit ec => client.disconnect() } .flatMap { _ =>
-          ZIO.succeed(client.isConnected()).repeat(Schedule.recurUntilEquals(false) && Schedule.spaced(100.milliseconds))
+          ZIO.succeed(client.isConnected()).repeat(Schedule.recurUntilEquals(false) && Schedule.spaced(Duration.fromMillis(100)))
             .timeoutFail(throw new TimeoutException(s"MQTT client disconnect timed out after ${timeout}"))(timeout)
         }.as(())
       } else {
@@ -111,9 +117,9 @@ class MqttConnectionCommons protected (mqttBrokerConfig: MqttBrokerConfig,
           map(_ => log.debug("Client {} connection dropped", clientId)).unit
   }
 
-  private def connectionOnPhase(statusCheckInterval: Duration = 1.seconds): RIO[Clock, Unit] = {
+  private def connectionOnPhase(statusCheckInterval: Duration = Duration.fromSeconds(1)): RIO[Clock, Unit] = {
     for {
-      uptimeDuration <- RIO { connectionMonkey.uptimeDuration }
+      uptimeDuration <- ZIO.attempt { connectionMonkey.uptimeDuration }
       _ = log.debug("Client {} {} connection uptime phase starts", clientId, uptimeDuration)
       _ <- flightRecorder.scheduledUptime(clientId)
       //TODO catch the errors to prevent shutting down the loop
@@ -123,14 +129,14 @@ class MqttConnectionCommons protected (mqttBrokerConfig: MqttBrokerConfig,
 
   private val connectionOffPhase: RIO[Clock, Unit] = {
     for {
-      downtimeDuration <- RIO { connectionMonkey.downtimeDuration }
+      downtimeDuration <- ZIO.attempt { connectionMonkey.downtimeDuration }
       _ = log.debug("Client {} {} connection downtime phase starts", clientId, downtimeDuration)
       _ <- flightRecorder.scheduledDowntime(clientId)
       _ <- dropConnection.flatMap(_ => ZIO.unit.delay(downtimeDuration))
     } yield ()
   }
 
-  private def connectionMaintenanceIteration(finalizing: Promise[Nothing, Unit], statusCheckInterval: Duration = 1.seconds): RIO[Clock, Unit] =
+  private def connectionMaintenanceIteration(finalizing: Promise[Nothing, Unit], statusCheckInterval: Duration = Duration.fromSeconds(1)): RIO[Clock, Unit] =
     if(intermittent) {
       log.debug("Tracking {} as intermittent: {}", clientId, connectionMonkey)
 //      connectionOnPhase(statusCheckInterval) *> connectionOffPhase
@@ -151,19 +157,19 @@ class MqttConnectionCommons protected (mqttBrokerConfig: MqttBrokerConfig,
    *
    * @return
    */
-  def maintainConnection(finalizing: Promise[Nothing, Unit], statusCheckInterval: Duration = 1.seconds): RIO[Clock, Unit] = {
+  def maintainConnection(finalizing: Promise[Nothing, Unit], statusCheckInterval: Duration = Duration.fromSeconds(1)): RIO[Clock, Unit] = {
     connectionMaintenanceIteration(finalizing, statusCheckInterval)
       .catchAll { err =>
-        ZIO { log.error(s"Client ${clientId.value} connection check iteration failed, will try again on next iteration", err) }
+        ZIO.attempt { log.error(s"Client ${clientId.value} connection check iteration failed, will try again on next iteration", err) }
       }
       .repeat(Schedule.spaced(statusCheckInterval))
       .ensuring {
 //      .onExit { exitResult =>
         (for {
-          _ <- ZIO { log.debug("Disconnecting client {} as maintainConnection has stopped", clientId.value) }
+          _ <- ZIO.attempt { log.debug("Disconnecting client {} as maintainConnection has stopped", clientId.value) }
           _ <- disconnect()
         } yield ()).
-          catchAll { err => UIO.succeed(log.error(s"Failed to close the client ${clientId}", err)) }.
+          catchAll { err => ZIO.succeed(log.error(s"Failed to close the client ${clientId}", err)) }.
           map { _ => log.debug(s"Client ${clientId} disconnect complete") }
       }.map { _ =>
       log.debug(s"Connect ${clientId} terminated")
