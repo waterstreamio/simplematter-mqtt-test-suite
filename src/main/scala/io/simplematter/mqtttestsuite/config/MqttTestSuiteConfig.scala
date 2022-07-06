@@ -107,7 +107,8 @@ case class KafkaConfig(bootstrapServers: String,
 
   lazy val producerProperties: Map[String, AnyRef] =
     commonProperties ++
-      Map(ProducerConfig.ACKS_CONFIG -> producerAcks)
+      Map(ProducerConfig.ACKS_CONFIG -> producerAcks,
+        ProducerConfig.CLIENT_ID_CONFIG -> "sm-test-producer")
 
 
   lazy val adminProperties: Map[String, AnyRef] = commonProperties

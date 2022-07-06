@@ -119,7 +119,7 @@ resource "kubernetes_pod" "mqtt-test-runner" {
       }
       env {
         name = "MQTT_TEST_SUITE_JAVA_OPTS"
-        value = "-XX:InitialRAMPercentage=${var.node_heap_percentage} -XX:MaxRAMPercentage=${var.node_heap_percentage} ${var.runner_additional_java_opts}"
+        value = "-XX:InitialRAMPercentage=${var.node_heap_percentage} -XX:MaxRAMPercentage=${var.node_heap_percentage} -Dlogback.configurationFile=/etc/testsuite/logback.xml ${var.runner_additional_java_opts}"
       }
       env {
         name = "MQTT_LOAD_STATS_UPLOADING_INTERVAL_MILLIS"

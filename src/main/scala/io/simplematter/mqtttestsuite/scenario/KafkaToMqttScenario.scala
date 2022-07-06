@@ -75,7 +75,6 @@ class KafkaToMqttScenario(stepInterval: Duration,
     val pseudoClientId = ClientId(nodeId.value + "-kafka")
     Producer.make(producerSettings).use { producer =>
       for {
-
         msgCounter <- Ref.make[Int](0)
         _ <- (for {
           n <-  msgCounter.updateAndGet(_ + 1)
