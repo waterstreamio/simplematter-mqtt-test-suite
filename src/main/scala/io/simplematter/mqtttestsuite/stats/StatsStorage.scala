@@ -135,21 +135,22 @@ class StatsStorage(nodeId: NodeId,
       }
       connectOutcomeTimestamp <- Clock.currentTime(TimeUnit.MILLISECONDS)
       connectExit <- connect.exit
-      _ = connectExit.mapBoth({ err =>
+      res <- connectExit.mapBoth({ err =>
         log.error(s"MQTT connect failed for ${clientId}", err)
         mqttConnectFailures.incrementAndGet()
         addClientEvent(clientId, ClientConnectFailed(connectOutcomeTimestamp))
+        err
       },
         { success =>
           log.debug("MQTT connect success for {}", clientId)
           mqttConnectSuccess.incrementAndGet()
           mqttConnectionsActive.incrementAndGet()
           addClientEvent(clientId, ClientConnectSuccess(connectOutcomeTimestamp))
+          success
         }
       )
-      connectRes <- ZIO.done(connectExit)
-    } yield connectRes
-  }
+    } yield res
+}
 
   def mqttConnectionClosed(clientId: ClientId, wasAccepted: Boolean): URIO[Clock, Unit] = {
     for {

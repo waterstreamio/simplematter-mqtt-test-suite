@@ -58,6 +58,7 @@ ThisBuild / assemblyMergeStrategy  := {
   case PathList("LICENSE", xs @ _*) => MergeStrategy.discard
   case PathList("NOTICE", xs @ _*) => MergeStrategy.discard
   case PathList("module-info.class", xs @ _*) => MergeStrategy.discard
+  case PathList("META-INF", "versions", "9", "module-info.class", xs @ _*) => MergeStrategy.discard
   case PathList("META-INF", "NOTICE", xs @ _*) => MergeStrategy.discard
   case PathList(xs @ _*) if Seq("pom.properties", "pom.xml").contains(xs.last) => MergeStrategy.discard
   case x => MergeStrategy.deduplicate
