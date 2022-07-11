@@ -110,59 +110,10 @@ package object util {
                 val runningBehind = expectedDurationMillis < nowMillis - startMillis
                 val sleepTime = (nowMillis - startMillis)
                 val nextRun   = if (runningBehind) now else start.plus(expectedDurationMillis, java.time.temporal.ChronoUnit.MILLIS)
-
                 (State(st, n + 1L), n, Decision.Continue(Interval.after(nextRun)))
-
-//                Decision.Continue(
-//                  n + 1L,
-//                  nextRun,
-//                    loop(Some(State(start)), n + 1L)
-//                )
               case _ =>
-//                val nextRun   = now.plus((1000/timesPerSecond).toLong, java.time.temporal.ChronoUnit.MILLIS)
-                (State(Some(now), 1L), 1L, Decision.Continue(Interval.empty))
-//
-//                Decision.Continue(
-//                  n + 1L,
-//                  nextRun,
-//                    loop(Some(State(now)), n + 1L)
-//                )
+                (State(Some(now), 1L), 1L, Decision.Continue(Interval.after(now)))
             })
 
   }
-//  def scheduleFrequency(timesPerSecond: Double): Schedule[Any, Any, Long] = {
-//    import zio.Schedule.Decision._
-//    import java.time.Duration
-//
-//    final case class State(start: OffsetDateTime)
-//
-//    def loop(state: Option[State], n: Long): StepFunction[Any, Any, Long] =
-//      (now: OffsetDateTime, _: Any) =>
-//        ZIO.succeed(state match {
-//          case Some(State(start)) =>
-//            val nowMillis     = now.toInstant.toEpochMilli()
-//            val startMillis   = start.toInstant.toEpochMilli()
-//            val expectedDurationMillis = (n*1000 / timesPerSecond).toLong
-//            val runningBehind = expectedDurationMillis < nowMillis - startMillis
-//            val sleepTime = (nowMillis - startMillis)
-//            val nextRun   = if (runningBehind) now else start.plus(Duration.ofMillis(expectedDurationMillis))
-//
-//            Continue(
-//              n + 1L,
-//              nextRun,
-//                loop(Some(State(start)), n + 1L)
-//            )
-//          case None =>
-//            val nextRun   = now.plus(Duration.ofMillis((1000/timesPerSecond).toLong))
-//
-//            Continue(
-//              n + 1L,
-//              nextRun,
-//                loop(Some(State(now)), n + 1L)
-//            )
-//        })
-//
-//    Schedule(loop(None, 0L))
-//  }
-
 }

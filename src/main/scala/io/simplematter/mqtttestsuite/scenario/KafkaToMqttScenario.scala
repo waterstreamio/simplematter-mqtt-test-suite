@@ -9,7 +9,7 @@ import io.simplematter.mqtttestsuite.stats.FlightRecorder
 import io.simplematter.mqtttestsuite.util.{ErrorInjector, MessageGenerator, pickCircular, scheduleFrequency}
 import org.apache.kafka.clients.producer.ProducerConfig
 import org.slf4j.LoggerFactory
-import zio.{Clock, Duration, Fiber, Promise, RIO, Ref, Schedule, Task, URIO, ZIO}
+import zio.{Clock, Duration, Fiber, Promise, RIO, Ref, Schedule, Task, URIO, ZIO, ZLayer}
 import zio.kafka.producer.*
 import zio.kafka.serde.Serde
 
@@ -71,26 +71,27 @@ class KafkaToMqttScenario(stepInterval: Duration,
   private def startProducing(flightRecorder: FlightRecorder, mqttTopicSubscribers: Map[MqttTopicName, Seq[ClientId]]): RIO[ScenarioEnv, Unit] = {
     val producerSettings = ProducerSettings(kafkaConfig.bootstrapServersSeq.toList)
       .withProperties(kafkaConfig.producerProperties)
+
     val pseudoClientId = ClientId(nodeId.value + "-kafka")
     ZIO.scoped {
-      for {
+      (for {
         producer <- Producer.make(producerSettings)
         msgCounter <- Ref.make[Int](0)
         _ <- (for {
-          n <-  msgCounter.updateAndGet(_ + 1)
+          n <- msgCounter.updateAndGet(_ + 1)
           msgId = MessageId(pseudoClientId, n)
           now <- Clock.currentTime(TimeUnit.MILLISECONDS)
           mqttTopic = thisNodeGroupedTopics.randomTopic()
           messageBody = MessageGenerator.generatePackedMessage(msgId, now, scenarioConfig.messageMinSize, scenarioConfig.messageMaxSize)
           expectedRecepients = mqttTopicSubscribers.getOrElse(mqttTopic, Seq.empty)
-//          _ = log.trace("Publishing {} message {}, timestamp {}, fan-out {}", nodeId, msgId, now, expectedRecepients)
+          //          _ = log.trace("Publishing {} message {}, timestamp {}, fan-out {}", nodeId, msgId, now, expectedRecepients)
           /* not interrupt to make sure that the statistics gets written correctly when the test shuts down */
           _ <- flightRecorder.
             recordMessageSend(msgId, producer.produce(scenarioConfig.kafkaDefaultTopic, mqttTopic.value, messageBody, Serde.string, Serde.string), mqttTopic, Some(expectedRecepients)).
             uninterruptible.
             fork
-      } yield ()).repeat(scheduleFrequency(scenarioConfig.kafkaProducerMessagesPerSecond))
-    } yield ()
+        } yield ()).repeat(scheduleFrequency(scenarioConfig.kafkaProducerMessagesPerSecond))
+      } yield ())
     }
   }
 }

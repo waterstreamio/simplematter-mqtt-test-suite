@@ -7,12 +7,12 @@
         </layout>
     </appender>
 
-    <logger name="io.simplematter" level="DEBUG"/>
-<!--    <logger name="io.simplematter" level="INFO"/>-->
+<!--    <logger name="io.simplematter" level="DEBUG"/>-->
+    <logger name="io.simplematter" level="INFO"/>
 <!--    <logger name="io.simplematter.mqtttestsuite.mqtt.MqttClient" level="INFO"/>-->
 <!--    <logger name="io.simplematter.mqtttestsuite.scenario.util.MqttPublisher" level="TRACE"/>-->
 <!--    <logger name="io.simplematter.mqtttestsuite.mqtt.MqttClient" level="DEBUG"/>-->
-    <logger name="io.simplematter.mqtttestsuite.stats.StatsStorage" level="DEBUG"/>
+<!--    <logger name="io.simplematter.mqtttestsuite.stats.StatsStorage" level="DEBUG"/>-->
 <!--    <logger name="io.simplematter.mqtttestsuite.stats.StatsStorage" level="TRACE"/>-->
     <logger name="io.netty" level="INFO"/>
 <!--    <logger name="io.netty" level="DEBUG"/>-->

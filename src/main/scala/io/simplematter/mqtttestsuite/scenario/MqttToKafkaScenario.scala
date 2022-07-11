@@ -135,7 +135,6 @@ class MqttToKafkaScenario(stepInterval: Duration,
             }
           })
         }.runDrain.onExecutor(kafkaReadingExecutor)
-      _ = log.info("***** kafka stream exec done")
     } yield ()
 
       for {

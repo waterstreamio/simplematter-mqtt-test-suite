@@ -451,12 +451,7 @@ class StatsStorage(nodeId: NodeId,
    * @return
    */
   def waitCompletion(timeout: Duration): RIO[Clock, Boolean]  = {
-//    ZIO.attempt {
-//      log.info("***** dummy wait")
-//      false
-//    }
     ZIO.attempt {
-      log.debug("***** waiting attempt")
       val sent = aggregatedMessagesSent.get()
       val expected = aggregatedMessagesExpected.get()
       val received = aggregatedMessagesReceived.get()
@@ -473,7 +468,6 @@ class StatsStorage(nodeId: NodeId,
         //TODO better reporting
         log.warn("More snapshots acknolwedged than sent - sent: {}, acknowledged: {}", sentSnapshot, acknowledgedSnapshot)
       }
-//      missingMessages <= 0 && (acknowledgedSnapshot >= sentSnapshot || !canAcknowledgeSnapshots)
       missingMessages == 0 && (acknowledgedSnapshot >= sentSnapshot || !canAcknowledgeSnapshots)
     }.repeat(Schedule.spaced(sleepingInterval) && Schedule.recurUntilEquals(true))
       .timeoutTo(false)(remaining => true)(timeout)
