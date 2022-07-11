@@ -15,9 +15,8 @@ SCRIPT_DIR=`realpath $(dirname "$0")`
 PROJECT_DIR=$SCRIPT_DIR/../..
 cd $PROJECT_DIR
 
-#export MQTT_LOAD_SERVER=localhost:1883
-export MQTT_LOAD_SERVER=ec2-18-197-10-57.eu-central-1.compute.amazonaws.com:1883
-export MQTT_LOAD_KAFKA_BOOTSTRAP_SERVERS=ec2-18-197-10-57.eu-central-1.compute.amazonaws.com:9092
+export MQTT_LOAD_SERVER=localhost:1883
+export MQTT_LOAD_KAFKA_BOOTSTRAP_SERVERS=localhost:9092
 
 export MQTT_LOAD_PERSISTENT_SESSION=true
 

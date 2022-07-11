@@ -451,7 +451,12 @@ class StatsStorage(nodeId: NodeId,
    * @return
    */
   def waitCompletion(timeout: Duration): RIO[Clock, Boolean]  = {
+//    ZIO.attempt {
+//      log.info("***** dummy wait")
+//      false
+//    }
     ZIO.attempt {
+      log.debug("***** waiting attempt")
       val sent = aggregatedMessagesSent.get()
       val expected = aggregatedMessagesExpected.get()
       val received = aggregatedMessagesReceived.get()
@@ -470,8 +475,7 @@ class StatsStorage(nodeId: NodeId,
       }
 //      missingMessages <= 0 && (acknowledgedSnapshot >= sentSnapshot || !canAcknowledgeSnapshots)
       missingMessages == 0 && (acknowledgedSnapshot >= sentSnapshot || !canAcknowledgeSnapshots)
-    }.
-      repeat(Schedule.spaced(sleepingInterval) && Schedule.recurUntilEquals(true))
+    }.repeat(Schedule.spaced(sleepingInterval) && Schedule.recurUntilEquals(true))
       .timeoutTo(false)(remaining => true)(timeout)
       .map { complete =>
         if (complete)
@@ -725,7 +729,7 @@ object StatsStorage {
             scenarioConfig: ScenarioConfig): RLayer[HazelcastInstance with Clock, StatsStorage with FlightRecorder] = {
     ZLayer.scoped {
       ZIO.acquireRelease({
-        for {hz <- ZIO.service[HazelcastInstance]
+        for { hz <- ZIO.service[HazelcastInstance]
              _ = log.debug("statsConfig: {}", statsConfig)
              storage = StatsStorage(nodeId, statsConfig, hz, mqttBrokerConfig, scenarioConfig)
              mqttBrokerConfigMap = hz.getMap[NodeId, String](mqttBrokerConfigMapName)

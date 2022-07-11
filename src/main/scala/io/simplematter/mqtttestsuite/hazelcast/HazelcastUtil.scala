@@ -20,7 +20,8 @@ object HazelcastUtil {
       ZIO.acquireRelease(ZIO.attempt { createHazelcastInstance(hazelcastConfig) })({
         (hzInstance: HazelcastInstance) =>
           ZIO.attempt ({
-            log.debug("Shutting down Hazelcast instance")
+//            log.debug("Shutting down Hazelcast instance")
+            log.info("Shutting down Hazelcast instance")
             hzInstance.shutdown()
           }).catchAll(e => ZIO.succeed {
             log.error("Failed to shut down Hazelcast instance", e)

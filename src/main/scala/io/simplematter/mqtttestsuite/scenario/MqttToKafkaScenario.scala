@@ -44,10 +44,6 @@ class MqttToKafkaScenario(stepInterval: Duration,
 
   private val kafkaClientId = ClientId("kafka-"+nodeId)
 
-  //To make sure that reading doesn't compete for the resources with the publishing
-  private val kafkaReadingExecutor = zio.Executor.fromThreadPoolExecutor(new ThreadPoolExecutor(
-    2, 10, 10, TimeUnit.SECONDS, new LinkedBlockingQueue[Runnable]()
-  ))
 
   override def start(): RIO[ScenarioEnv, Fiber[Any, Any]] = {
     log.info(s"Starting the scenario for node ${nodeId}")
@@ -84,17 +80,28 @@ class MqttToKafkaScenario(stepInterval: Duration,
         val ifmClients = publishersWithConnections.map(_._1).map(client => (client.clientId, client.publishInFlightCount())).filter(_._2 > 0)
         log.debug("Connections interrupted. Clients with in-flight messages: {}", ifmClients)
       }.fork
-     } yield ( connectionsFiber )
-  }
+//     } yield ( connectionsFiber.zip(kafkaFiber) )
+    } yield ( connectionsFiber )
+}
 
   /**
    *
    * @return effect that completes when Kafka client is fully initlialized. Actual processing is forked and runs in the background.
    */
+//  private def subscribeKafkaWithFixedPartitions(): RIO[ScenarioEnv, Fiber[Any, Any]] = {
   private def subscribeKafkaWithFixedPartitions(): RIO[ScenarioEnv, Unit] = {
     val offsetsCache = KafkaOffsetsCache(kafkaConfig, "mqtt2kafka")
 
-    val consumerLayer = ZLayer.fromZIO(for {
+    //To make sure that reading doesn't compete for the resources with the publishing we need a separate executor.
+    //Dedicated layer for the executor so that it would be spawned before KafkaConsumer and shut down after.
+    val executorLayer = ZLayer.scoped {
+      ZIO.acquireRelease {
+        ZIO.attempt { ThreadPoolExecutor(2, 10, 10, TimeUnit.SECONDS, new LinkedBlockingQueue[Runnable]()) }
+      } {
+        tpe => ZIO.attempt { tpe.shutdown() }.ignoreLogged
+      }
+    }
+    val consumerLayer = ZLayer.scoped(for {
       hz <- ZIO.service[HazelcastInstance]
       consumerSettings: ConsumerSettings =
         ConsumerSettings(kafkaConfig.bootstrapServersSeq.toList)
@@ -105,9 +112,10 @@ class MqttToKafkaScenario(stepInterval: Duration,
       kafkaConsumer <- Consumer.make(consumerSettings)
     } yield kafkaConsumer)
 
-    def streamExec(thisNodeTopicPartitions: Set[TopicPartition]): RIO[Consumer with Clock with FlightRecorder with HazelcastInstance, Unit] = for {
+    def streamExec(thisNodeTopicPartitions: Set[TopicPartition]): RIO[Consumer with Clock with FlightRecorder with HazelcastInstance with ThreadPoolExecutor, Unit] = for {
       flightRecorder <- ZIO.service[FlightRecorder]
-
+      tpExecutor <- ZIO.service[ThreadPoolExecutor]
+      kafkaReadingExecutor = zio.Executor.fromThreadPoolExecutor(tpExecutor)
       _ <- Consumer.subscribeAnd(Subscription.Manual(thisNodeTopicPartitions))
         .plainStream(Serde.string, Serde.string)
         .mapZIO { rec =>
@@ -126,20 +134,18 @@ class MqttToKafkaScenario(stepInterval: Duration,
               rec.offset
             }
           })
-        }.runDrain
+        }.runDrain.onExecutor(kafkaReadingExecutor)
+      _ = log.info("***** kafka stream exec done")
     } yield ()
 
-    ZIO.scoped {
       for {
         //TODO configurable timeout
         thisNodeTopicPartitions <- KafkaUtils.getThisNodePartitions(nodeIndex, kafkaConfig, scenarioConfig.kafkaTopicsSeq, 30).map(_.toSet)
         //Init offsets cache before starting the message reading loop
         _ <- offsetsCache.getOffsets(thisNodeTopicPartitions)
-        /* We can only fork here due to strange zio-kafka behavior - it doesn't start consuming if forked before provideSomeLayer */
-        //      _ <- streamExec(thisNodeTopicPartitions).provideSomeLayer[ScenarioEnv](consumerLayer).lock(kafkaReadingExecutor).fork
-        _ <- streamExec(thisNodeTopicPartitions).provideSome[ScenarioEnv with Scope](consumerLayer).onExecutor(kafkaReadingExecutor).fork
+        /* We can only fork here - it doesn't start consuming if forked before provideSomeLayer */
+        kafkaFiber: Fiber[Any, Any] <- streamExec(thisNodeTopicPartitions).provideSome[ScenarioEnv](executorLayer >+> consumerLayer).fork
       } yield ()
-    }
   }
 }
 

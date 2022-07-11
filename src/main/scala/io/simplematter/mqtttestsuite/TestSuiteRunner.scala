@@ -61,26 +61,34 @@ object TestSuiteRunner extends ZIOAppDefault {
       .provideSomeLayer[Clock with Console](testSuiteLayer(config, scenarioConfig))
   }
 
-  private def testSuiteLayer(config: MqttTestSuiteConfig, scenarioConfig: ScenarioConfig): ZLayer[Clock, Throwable, FlightRecorder with StatsStorage with StatsReporter with HazelcastInstance ] = {
+  private def testSuiteLayer(config: MqttTestSuiteConfig, scenarioConfig: ScenarioConfig): ZLayer[Clock, Throwable, FlightRecorder with StatsStorage with StatsReporter with HazelcastInstance] = {
     val hz = HazelcastUtil.hazelcastInstanceLayer(config.hazelcast)
 
     val statsStorage = (hz ++ ZLayer.service[Clock]) >>>
         StatsStorage.layer(config.nodeIdNonEmpty, config.stats, config.stats.statsUploadInterval, config.mqtt, scenarioConfig).passthrough
 
 //    val statsReporter = ZLayer.fromService[StatsStorage, StatsReporter](statsStorage => StatsReporter(config.stats, statsStorage))
+    val statsReporter = ZLayer.fromZIO {
+      for {
+        statsStorage <- ZIO.service[StatsStorage]
+      } yield StatsReporter(config.stats, statsStorage)
+    }
 //    val statsReporter =
-    ZLayer.fromZIOEnvironment {
-      ZIO.scoped {
-        for {
-//          //        a = StatsStorage.layer(config.nodeIdNonEmpty, config.stats, config.stats.statsUploadInterval, config.mqtt, scenarioConfig)
-//          statsStorageEnv <- StatsStorage.layer(config.nodeIdNonEmpty, config.stats, config.stats.statsUploadInterval, config.mqtt, scenarioConfig).build
-            statsStorageEnv <- statsStorage.build
-          //        statsStorage <- ZIO.service[StatsStorage]
-//          flightRecorder <- ZIO.service[FlightRecorder]
-          //      } yield StatsReporter(config.stats, statsStorage)
-        } yield zio.ZEnvironment(StatsReporter(config.stats, statsStorageEnv.get[StatsStorage])) ++ statsStorageEnv
-      }
-  }
+//    ZLayer.fromZIOEnvironment {
+//      ZIO.scoped {
+//        for {
+////          //        a = StatsStorage.layer(config.nodeIdNonEmpty, config.stats, config.stats.statsUploadInterval, config.mqtt, scenarioConfig)
+////          statsStorageEnv <- StatsStorage.layer(config.nodeIdNonEmpty, config.stats, config.stats.statsUploadInterval, config.mqtt, scenarioConfig).build
+//            statsStorageEnv <- statsStorage.build
+//          //        statsStorage <- ZIO.service[StatsStorage]
+////          flightRecorder <- ZIO.service[FlightRecorder]
+//          //      } yield StatsReporter(config.stats, statsStorage)
+//        } yield zio.ZEnvironment(StatsReporter(config.stats, statsStorageEnv.get[StatsStorage])) ++ statsStorageEnv
+//      }
+//    }
+
+//    (statsStorage >>> statsReporter).passthrough
+      statsStorage >+> statsReporter
 
 //    (hz ++ ZLayer.service[Clock]) >>> statsReporter
 //    statsReporter
