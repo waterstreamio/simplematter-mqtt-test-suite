@@ -30,7 +30,7 @@ object TestSuiteRunner extends ZIOAppDefault {
       scn = MqttTestScenario.create(config, scenarioConfig, runnerNodeIndex)
       _ = log.info("Starting scenario {} with node index {}", scn.name, runnerNodeIndex)
       statsReporter <- ZIO.service[StatsReporter]
-      stF <- statsReporter.run().fork
+      stF <- statsReporter.run().ignoreLogged.fork
 //      postScenario <- scn.start()
 //      _ = log.info(s"Scenario ${scn.name} complete, waiting ${config.completionTimeout} for the remaining messages")
 //      _ <- StatsStorage.waitCompletion(config.completionTimeout)

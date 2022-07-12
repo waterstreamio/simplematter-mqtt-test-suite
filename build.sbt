@@ -24,6 +24,7 @@ libraryDependencies ++= Seq(
   "dev.zio"               %% "zio-kafka"           % "2.0.0",
 
   //HTTP
+  //TODO upgrade to the next version which contains a fix for this: https://github.com/dream11/zio-http/issues/1344 and is compatible with ZIO 2.0.0
   "io.d11"                %% "zhttp"               % "2.0.0-RC9",
 
   //Data distribution

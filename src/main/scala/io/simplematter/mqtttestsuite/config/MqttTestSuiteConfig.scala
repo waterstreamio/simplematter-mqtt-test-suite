@@ -87,7 +87,8 @@ case class KafkaConfig(bootstrapServers: String,
                        fetchMaxBytes: Int = 52428800,
                        fetchMaxWaitMs: Int = 500,
                        producerAcks: String = "all",
-                       pollTimeoutMs: Long = 50
+                       pollTimeoutMs: Long = 50,
+                       maxParallelProduce: Int = 1000
                       ) {
   lazy val bootstrapServersSeq: Seq[String] = bootstrapServers.split(",").map(_.trim)
 
@@ -108,7 +109,12 @@ case class KafkaConfig(bootstrapServers: String,
   lazy val producerProperties: Map[String, AnyRef] =
     commonProperties ++
       Map(ProducerConfig.ACKS_CONFIG -> producerAcks,
-        ProducerConfig.CLIENT_ID_CONFIG -> "sm-test-producer")
+        ProducerConfig.CLIENT_ID_CONFIG -> "sm-test-producer",
+        ProducerConfig.LINGER_MS_CONFIG -> long2Long(lingerMs),
+        ProducerConfig.BATCH_SIZE_CONFIG -> int2Integer(batchSize),
+        ProducerConfig.COMPRESSION_TYPE_CONFIG -> compressionType,
+        ProducerConfig.MAX_BLOCK_MS_CONFIG -> long2Long(maxBlockMs)
+      )
 
 
   lazy val adminProperties: Map[String, AnyRef] = commonProperties

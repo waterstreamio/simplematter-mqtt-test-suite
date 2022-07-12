@@ -52,3 +52,9 @@ LOGBACK_CONFIG=$SCRIPT_DIR/logback_to_stdout.xml
 
 sbt -Dhazelcast.diagnostics.enabled=false -Dlogback.configurationFile=$LOGBACK_CONFIG "runMain io.simplematter.mqtttestsuite.TestSuiteRunner"
 
+#cd $PROJECT_DIR
+#sbt assembly
+#MQTT_TEST_SUITE_VERSION=`sbt -Dsbt.supershell=false -error "print version"`
+#
+#java -Dhazelcast.diagnostics.enabled=false -Dlogback.configurationFile=$LOGBACK_CONFIG -jar target/scala-3.1.3/simplematter-mqtt-test-suite-assembly-${MQTT_TEST_SUITE_VERSION}.jar
+

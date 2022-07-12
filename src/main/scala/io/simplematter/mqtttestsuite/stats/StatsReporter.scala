@@ -19,16 +19,18 @@ class StatsReporter(statsConfig: StatsConfig, statsProvider: StatsProvider) {
   def run(): RIO[Clock, Unit] = {
     for {
       psF <- printStatsRegularly(statsConfig.statsInterval).fork
-      _ <- statsConfig.statsPortIntOption.fold[RIO[Clock, Unit]]{
+      //TODO run HTTP effect after upgrading zio-http
+//      _ <- statsConfig.statsPortIntOption.fold[RIO[Clock, Unit]]{
+      _ = statsConfig.statsPortIntOption.fold[RIO[Clock, Unit]]{
         log.debug("Stats HTTP port not specified, not exposing the stats")
         ZIO.succeed(())
       }{port =>
         log.debug(s"Exposing stats on HTTP port $port")
-        runHttpService(port)}
+        runHttpService(port)
+      }
       _ <- psF.join
     } yield ()
   }
-
 
   def printStats(now: Long,
                  label: Option[String] = None) = {
