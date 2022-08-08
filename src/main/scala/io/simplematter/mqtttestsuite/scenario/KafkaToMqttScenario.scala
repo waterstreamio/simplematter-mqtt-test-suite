@@ -87,6 +87,7 @@ class KafkaToMqttScenario(stepInterval: Duration,
           messageBody = MessageGenerator.generatePackedMessage(msgId, now, scenarioConfig.messageMinSize, scenarioConfig.messageMaxSize)
           expectedRecepients = mqttTopicSubscribers.getOrElse(mqttTopic, Seq.empty)
           //          _ = log.trace("Publishing {} message {}, timestamp {}, fan-out {}", nodeId, msgId, now, expectedRecepients)
+          //TODO may we have flight recorder reacting to msgAck, yet this for loop waiting for produceAsync? This would give more accurate error statistics
           /* not interrupt to make sure that the statistics gets written correctly when the test shuts down */
           msgAck: Task[RecordMetadata] <- //sendingsSemaphore.withPermit(
             flightRecorder.

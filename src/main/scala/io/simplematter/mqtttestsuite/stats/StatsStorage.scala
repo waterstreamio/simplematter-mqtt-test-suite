@@ -6,12 +6,9 @@ import io.simplematter.mqtttestsuite.util.QuantileApprox
 import io.simplematter.mqtttestsuite.config.{HazelcastConfig, MqttBrokerConfig}
 import io.simplematter.mqtttestsuite.util.*
 import org.slf4j.LoggerFactory
-import zio.{Fiber, RIO, Schedule, Task, UIO, URIO, ZIO}
-import zio.Clock
-import zio.Duration
-import zio.{RLayer, TaskLayer, ULayer, URLayer, ZLayer}
-import zio.json.{JsonEncoder, JsonDecoder}
-import zio.json._
+import zio.{Cause, Clock, Duration, Exit, Fiber, RIO, RLayer, Schedule, Task, TaskLayer, UIO, ULayer, URIO, URLayer, ZIO, ZLayer}
+import zio.json.{JsonDecoder, JsonEncoder}
+import zio.json.*
 
 import java.util.concurrent.{ConcurrentHashMap, ConcurrentSkipListSet, TimeUnit}
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
@@ -482,19 +479,21 @@ class StatsStorage(nodeId: NodeId,
 
   private def publishStats(): Task[Unit] = {
     ZIO.attemptBlocking {
+      log.debug("Publishing stats updates to the topic {}", statsReportingTopicName)
       statsReportingTopic.publish(getSnapshot().toJson)
     }
   }
 
   private def statsPublishingLoop(interval: Duration): RIO[Clock, Unit] = {
-    publishStats()
+    publishStats().timeout(Duration.fromSeconds(20)).catchAll {e => ZIO.attempt(log.warn("Stats publishing failed", e))}
       .repeat(Schedule.spaced(interval))
-      .onInterrupt(publishStats().logExceptions("Final stats report failed", log, ()))
+      .onInterrupt(ZIO.succeed(log.debug("Stats publishing loop interrupted, publishing final stats report")) *>
+        publishStats().logExceptions("Final stats report failed", log, ()))
       .as(())
   }
 
   private def listenForUpdates(): Unit = {
-    log.debug(s"Listening for stats updates on topic ${StatsStorage.statsReportingTopicName}")
+    log.debug(s"Listening for stats updates from the topic ${StatsStorage.statsReportingTopicName}")
 
     statsReportingTopic.addMessageListener(new MessageListener[String] {
       def onMessage(msg: Message[String]): Unit = {
@@ -724,50 +723,29 @@ object StatsStorage {
     ZLayer.scoped {
       ZIO.acquireRelease({
         for { hz <- ZIO.service[HazelcastInstance]
+              scope <- ZIO.scope
+              _ <- scope.addFinalizer(ZIO.succeed(log.info("qqqqq Layer is being finalized")))
+             testLoopFiber <- ZIO.attempt(log.info("qqqqq Test loop")).repeat(Schedule.spaced(Duration.fromSeconds(2))).interruptible.fork
              _ = log.debug("statsConfig: {}", statsConfig)
              storage = StatsStorage(nodeId, statsConfig, hz, mqttBrokerConfig, scenarioConfig)
              mqttBrokerConfigMap = hz.getMap[NodeId, String](mqttBrokerConfigMapName)
              scenarioConfigMap = hz.getMap[NodeId, String](scenarioConfigMapName)
              _ = mqttBrokerConfigMap.put(nodeId, mqttBrokerConfig.toJson)
              _ = scenarioConfigMap.put(nodeId, scenarioConfig.toJson)
-             publishingFiber <- storage.statsPublishingLoop(statsReportingInterval).interruptible.fork
-             errorDetectionFiber <- storage.errorsDetectionLoop().interruptible.fork
+              publishingFiber <- storage.statsPublishingLoop(statsReportingInterval).interruptible.forkIn(scope)
+             errorDetectionFiber <- storage.errorsDetectionLoop().interruptible.forkIn(scope)
              _ = storage.listenForUpdates()
-//             } yield (Has.allOf[StatsStorage, FlightRecorder](storage, storage), publishingFiber.zip(errorDetectionFiber))
+             _ = log.debug("Layer creation complete for node {}", nodeId)
         } yield (zio.ZEnvironment(storage, storage), publishingFiber.zip(errorDetectionFiber))
     })({
         res =>
-          //TODO terminate all StatsStorage activities here, release all the fibers
           for {
-            _ <- ZIO.succeed(())
-            _ = log.debug("Shutting down StatsStorage background activities")
+            _ <- ZIO.succeed(log.debug("Shutting down StatsStorage background activities"))
             _ <- res._2.interrupt
           } yield ()
       }).map(_._1.get)
     }
   }
-
-//    ZLayer.fromAcquireReleaseMany[HazelcastInstance with Clock, Throwable, (StatsStorage with FlightRecorder, Fiber[Throwable, Any])] {
-//      for {hz <- ZIO.service[HazelcastInstance]
-//           _ = log.debug("statsConfig: {}", statsConfig)
-//           storage = StatsStorage(nodeId, statsConfig, hz, mqttBrokerConfig, scenarioConfig)
-//           mqttBrokerConfigMap = hz.getMap[NodeId, String](mqttBrokerConfigMapName)
-//           scenarioConfigMap = hz.getMap[NodeId, String](scenarioConfigMapName)
-//           _ = mqttBrokerConfigMap.put(nodeId, mqttBrokerConfig.toJson)
-//           _ = scenarioConfigMap.put(nodeId, scenarioConfig.toJson)
-//           publishingFiber <- storage.statsPublishingLoop(statsReportingInterval).interruptible.fork
-//           errorDetectionFiber <- storage.errorsDetectionLoop().interruptible.fork
-//           _ = storage.listenForUpdates()
-//           } yield (Has.allOf[StatsStorage, FlightRecorder](storage, storage), publishingFiber.zip(errorDetectionFiber))
-//  } { res =>
-//      //TODO terminate all StatsStorage activities here, release all the fibers
-//      for {
-//        _ <- ZIO.succeed(())
-//        _ = log.debug("Shutting down StatsStorage background activities")
-//        _ <- res._2.interrupt
-//      } yield ()
-//    }.map (_._1)
-//  }
 
   def waitCompletion(timeout: Duration): RIO[Clock with StatsStorage, Boolean] =
       ZIO.service[StatsStorage].flatMap(_.waitCompletion(timeout))

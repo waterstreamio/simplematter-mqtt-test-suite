@@ -31,12 +31,6 @@ object TestSuiteRunner extends ZIOAppDefault {
       _ = log.info("Starting scenario {} with node index {}", scn.name, runnerNodeIndex)
       statsReporter <- ZIO.service[StatsReporter]
       stF <- statsReporter.run().ignoreLogged.fork
-//      postScenario <- scn.start()
-//      _ = log.info(s"Scenario ${scn.name} complete, waiting ${config.completionTimeout} for the remaining messages")
-//      _ <- StatsStorage.waitCompletion(config.completionTimeout)
-//      _ <- stF.interrupt
-//      _ <- postScenario.interrupt
-      //TODO try again with flatMap
       _ <- scn.start().onError(cause =>
         //fail
         for {
@@ -67,47 +61,15 @@ object TestSuiteRunner extends ZIOAppDefault {
     val statsStorage = (hz ++ ZLayer.service[Clock]) >>>
         StatsStorage.layer(config.nodeIdNonEmpty, config.stats, config.stats.statsUploadInterval, config.mqtt, scenarioConfig).passthrough
 
-//    val statsReporter = ZLayer.fromService[StatsStorage, StatsReporter](statsStorage => StatsReporter(config.stats, statsStorage))
     val statsReporter = ZLayer.fromZIO {
       for {
         statsStorage <- ZIO.service[StatsStorage]
       } yield StatsReporter(config.stats, statsStorage)
     }
-//    val statsReporter =
-//    ZLayer.fromZIOEnvironment {
-//      ZIO.scoped {
-//        for {
-////          //        a = StatsStorage.layer(config.nodeIdNonEmpty, config.stats, config.stats.statsUploadInterval, config.mqtt, scenarioConfig)
-////          statsStorageEnv <- StatsStorage.layer(config.nodeIdNonEmpty, config.stats, config.stats.statsUploadInterval, config.mqtt, scenarioConfig).build
-//            statsStorageEnv <- statsStorage.build
-//          //        statsStorage <- ZIO.service[StatsStorage]
-////          flightRecorder <- ZIO.service[FlightRecorder]
-//          //      } yield StatsReporter(config.stats, statsStorage)
-//        } yield zio.ZEnvironment(StatsReporter(config.stats, statsStorageEnv.get[StatsStorage])) ++ statsStorageEnv
-//      }
-//    }
 
-//    (statsStorage >>> statsReporter).passthrough
-      statsStorage >+> statsReporter
-
-//    (hz ++ ZLayer.service[Clock]) >>> statsReporter
-//    statsReporter
-
-
-//      statsStorage >+> statsReporter
-//    (statsStorage >>> statsReporter.passthrough).passthrough
-//    val res = (statsStorage >>> statsReporter.passthrough).passthrough
-//    val res = (statsStorage >>> statsReporter.passthrough)
-//    res
-//statsStorage
-//statsReporter
-//    ZLayer.make
-//    ZLayer.make[FlightRecorder & StatsStorage & StatsReporter & HazelcastInstance](
-//      statsStorage, statsReporter
-//    )
+    (statsStorage >+> statsReporter)
   }
 
-//  def run: ZIO[Environment with ZIOAppArgs with Scope, Any, Any] = testSuite().exitCode
   def run: ZIO[Environment with ZIOAppArgs with Scope, Any, Any] = testSuite().provideEnvironment(DefaultServices.live)
 
 }

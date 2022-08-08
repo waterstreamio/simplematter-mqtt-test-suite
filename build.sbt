@@ -13,7 +13,7 @@ libraryDependencies ++= Seq(
   //Misc
   "ch.qos.logback"        % "logback-classic"      %  "1.0.13",
   "dev.zio"               %% "zio"                 % "2.0.0",
-  "dev.zio"               %% "zio-json"            % "0.3.0-RC9",
+  "dev.zio"               %% "zio-json"            % "0.3.0-RC10",
 
   //MQTT
   "io.netty"              % "netty-common"         % nettyVersion,
@@ -24,16 +24,15 @@ libraryDependencies ++= Seq(
   "dev.zio"               %% "zio-kafka"           % "2.0.0",
 
   //HTTP
-  //TODO upgrade to the next version which contains a fix for this: https://github.com/dream11/zio-http/issues/1344 and is compatible with ZIO 2.0.0
-  "io.d11"                %% "zhttp"               % "2.0.0-RC9",
+  "io.d11"                %% "zhttp"               % "2.0.0-RC10",
 
   //Data distribution
   "com.hazelcast"         % "hazelcast-all"        % hazelcastVersion,
 
   //Config
   "com.typesafe"          % "config"               % "1.4.1",
-  "dev.zio"               %% "zio-config-typesafe" % "3.0.1",
-  "dev.zio"               %% "zio-config-magnolia" % "3.0.1",
+  "dev.zio"               %% "zio-config-typesafe" % "3.0.2",
+  "dev.zio"               %% "zio-config-magnolia" % "3.0.2",
 
   //Test dependencies
   "org.testcontainers"    % "testcontainers"                  % "1.15.3"         % "test",
@@ -43,7 +42,6 @@ libraryDependencies ++= Seq(
   "org.scalatest"         %% "scalatest"                      % scalaTestVersion % "test",
   "org.scalatest"         %% "scalatest-core"                 % scalaTestVersion % "test",
   "org.scalatestplus"     %% "scalacheck-1-15"                % "3.2.9.0"        % "test",
-//  "dev.zio"               %% "zio-test"                       % "1.0.12"         % "test",
   "dev.zio"               %% "zio-test"                       % "2.0.0"         % "test",
 )
 

@@ -15,14 +15,7 @@ object TestSuiteStatsAggregator extends zio.ZIOAppDefault {
 
   lazy val config = MqttTestSuiteConfig.load()
 
-//  def run(args: List[String]): URIO[Any, ExitCode] = {
     def run: ZIO[Environment with ZIOAppArgs with Scope, Any, Any] = {
-//    (for {
-//      statsProvider <- ZIO.service[StatsProvider]
-//      statsReporter = StatsReporter(config.stats, statsProvider)
-//      _ = log.info("Starting stats reporter")
-//      _ <- statsReporter.run()
-//    } yield ()).provideSomeLayer[ZEnvironment](HazelcastUtil.hazelcastInstanceLayer(config.hazelcast) >>> StatsAggregator.layer).exitCode
       val body = (for {
         statsProvider <- ZIO.service[StatsProvider]
         statsReporter = StatsReporter(config.stats, statsProvider)
@@ -31,7 +24,6 @@ object TestSuiteStatsAggregator extends zio.ZIOAppDefault {
       } yield ())
       body.provideSome[zio.Clock](HazelcastUtil.hazelcastInstanceLayer(config.hazelcast), StatsAggregator.layer)
         .provideEnvironment(zio.DefaultServices.live)
-//      res.provideSomeLayer[ZEnvironment](HazelcastUtil.hazelcastInstanceLayer(config.hazelcast) >>> StatsAggregator.layer).exitCode
   }
 
 }

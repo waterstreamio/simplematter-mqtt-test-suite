@@ -5,8 +5,8 @@ SCRIPT_DIR=`realpath $(dirname "$0")`
 PROJECT_DIR=$SCRIPT_DIR/../..
 cd $PROJECT_DIR
 
-IMAGE_NAME=simplematter/simplematter-mqtt-test-suite:0.0.4
-#IMAGE_NAME=simplematter/simplematter-mqtt-test-suite:0.0.5-SNAPSHOT
+#IMAGE_NAME=simplematter/simplematter-mqtt-test-suite:0.0.5
+IMAGE_NAME=simplematter/simplematter-mqtt-test-suite:0.0.6-SNAPSHOT
 #IMAGE_NAME=simplematter-mqtt-test-suite
 CONTAINER_NAME=simplematter-mqtt-test-suite-agg
 echo Starting $CONTAINER_NAME from $IMAGE_NAME
