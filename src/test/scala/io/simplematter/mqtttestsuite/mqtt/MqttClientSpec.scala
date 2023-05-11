@@ -442,6 +442,7 @@ class MqttClientSpec extends AnyFlatSpec
     val incomingMessageHandlerPromise = Promise[Unit]()
 
     c.onPublishRecieve { pub =>
+      ReferenceCountUtil.retain(pub)
       receivedPublishMessages.updateAndGet { prevMessages => prevMessages :+ pub }
     }
 
@@ -501,5 +502,6 @@ class MqttClientSpec extends AnyFlatSpec
     sentPubCompMessages.get().head.messageId() shouldBe receivedPublishMessages.get().last.variableHeader().packetId()
 
     receivedPublishMessages.get().foreach(ReferenceCountUtil.release)
+    incomingPublishMessages.get().foreach(ReferenceCountUtil.release)
   }
 }
