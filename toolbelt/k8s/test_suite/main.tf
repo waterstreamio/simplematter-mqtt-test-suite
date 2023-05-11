@@ -73,7 +73,7 @@ resource "kubernetes_config_map" "etc_testsuite" {
   }
 
   data = {
-    logback_xml = file("${path.module}/resources/logback.xml")
+    "logback.xml" = file("${path.module}/resources/logback.xml")
   }
 }
 

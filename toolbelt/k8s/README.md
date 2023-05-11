@@ -10,7 +10,7 @@ How to run on GCP GKE
     cd gcp_gke_cluster
     terraform apply --auto-approve 
 ``` 
-3. Configura and run the test suite. In another terminal:
+3. Configure and run the test suite. In another terminal:
 ```
     cd test_suite
     cp config.auto.tfvars.example config.auto.tfvars

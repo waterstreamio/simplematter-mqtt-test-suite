@@ -458,6 +458,7 @@ class MqttClient(host: String, port: Int, options: MqttOptions = MqttOptions()) 
   }
 
   private def sendPuback(messageId: Int): Future[Unit] = {
+    log.debug("Sending PUBACK {} {}", options.clientId, messageId)
     val varHeader = new MqttPubReplyMessageVariableHeader(messageId, MqttPubReplyMessageVariableHeader.REASON_CODE_OK, MqttProperties.NO_PROPERTIES)
     val message = new MqttPubAckMessage(fixedHeader(MqttMessageType.PUBACK), varHeader)
     writeAndPromise(message)
@@ -465,6 +466,7 @@ class MqttClient(host: String, port: Int, options: MqttOptions = MqttOptions()) 
   }
 
   private def sendPubrec(messageId: Int): Future[Unit] = {
+    log.debug("Sending PUBREC {} {}", options.clientId, messageId)
     val varHeader = new MqttPubReplyMessageVariableHeader(messageId, MqttPubReplyMessageVariableHeader.REASON_CODE_OK, MqttProperties.NO_PROPERTIES)
     writeAndPromise(MqttMessageFactory.newMessage(
       fixedHeader(MqttMessageType.PUBREC), varHeader, null))
@@ -480,6 +482,7 @@ class MqttClient(host: String, port: Int, options: MqttOptions = MqttOptions()) 
   }
 
   private def sendPubcomp(messageId: Int): Future[Unit] = {
+    log.debug("Sending PUBCOMP {} {}", options.clientId, messageId)
     val varHeader = new MqttPubReplyMessageVariableHeader(messageId, MqttPubReplyMessageVariableHeader.REASON_CODE_OK, MqttProperties.NO_PROPERTIES)
     writeAndPromise(MqttMessageFactory.newMessage(
       fixedHeader(MqttMessageType.PUBCOMP), varHeader, null))
@@ -641,17 +644,24 @@ class MqttClient(host: String, port: Int, options: MqttOptions = MqttOptions()) 
           case Failure(exception) => log.warn(s"Message processing failed messageId=${messageId}, topic=${message.variableHeader().topicName()}, clientId=${options.clientId}", exception)
           case _ => //nop
         }
-        message.fixedHeader().qosLevel() match {
-          case MqttQoS.AT_LEAST_ONCE =>
-            //TODO when we support MQTT 5.0 in this client - also report success/failure code
-            sendPuback(messageId).logExceptions(s"PUBACK error messageId=${messageId}", log)
-          case MqttQoS.EXACTLY_ONCE =>
-            sendPubrec(messageId).logExceptions(s"PUBREC error messageId=${messageId}", log)
-          case _ => //nop
-        }
-        ReferenceCountUtil.release(message)
+        acknowledgeAndReleasePublish(message)
       }
+    } else {
+      acknowledgeAndReleasePublish(message)
     }
+  }
+
+  private def acknowledgeAndReleasePublish(message: MqttPublishMessage): Unit = {
+    val messageId = message.variableHeader().packetId()
+    message.fixedHeader().qosLevel() match {
+      case MqttQoS.AT_LEAST_ONCE =>
+        //TODO when we support MQTT 5.0 in this client - also report success/failure code
+        sendPuback(messageId).logExceptions(s"PUBACK error messageId=${messageId}", log)
+      case MqttQoS.EXACTLY_ONCE =>
+        sendPubrec(messageId).logExceptions(s"PUBREC error messageId=${messageId}", log)
+      case _ => //nop
+    }
+    ReferenceCountUtil.release(message)
   }
 
   private def writeAndPromise(message: MqttMessage): Future[Unit] = {
